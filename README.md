@@ -4,7 +4,7 @@
 
 [**Wiki**](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki) · [**Documentation**](docs/) · [**Releases**](https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases) · [**Changelog**](CHANGELOG.md) · [**Issues**](https://github.com/paulmann/Fail2Ban_AbuseIPDB/issues) · [**Security**](SECURITY.md)
 
-<img src="/paulmann/Fail2Ban_AbuseIPDB/raw/main/assets/social-preview.png" alt="Fail2Ban_AbuseIPDB — asynchronous fail2ban to AbuseIPDB reporting: a durable local SQLite queue, evidence-backed reports, an API key file that survives updates, and a SHA-256-verified self-updater" style="max-width: 100%;">
+<img src="https://github.com/paulmann/Fail2Ban_AbuseIPDB/raw/main/assets/social-preview.png" alt="Fail2Ban_AbuseIPDB — asynchronous fail2ban to AbuseIPDB reporting: a durable local SQLite queue, evidence-backed reports, an API key file that survives updates, and a SHA-256-verified self-updater" style="max-width: 100%;">
 
 [![CI](https://github.com/paulmann/Fail2Ban_AbuseIPDB/actions/workflows/ci.yml/badge.svg)](https://github.com/paulmann/Fail2Ban_AbuseIPDB/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/paulmann/Fail2Ban_AbuseIPDB?label=release&sort=semver)](https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases)
