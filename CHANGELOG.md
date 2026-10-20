@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
     ban duration, failure counters, generic patterns, attacker request URLs;
   * per-jail AbuseIPDB category mapping and automatic SQL-injection category;
   * PII-free comments (no attempted usernames, no mail content);
+  * configurable attribution footer in every report
+    (`Reported via Fail2Ban_AbuseIPDB Monitor: ...`), appended last and never
+    truncated;
   * IPv4 and IPv6 support, ignore ranges for private/reserved/CDN networks.
 * Production installer `install.sh`:
   * backups of every replaced file, install manifest, idempotent upgrade;
@@ -30,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   * uninstall with restore of previous files, optional `--purge`.
 * Documentation: English README, installation, configuration, architecture and
   troubleshooting guides.
-* Tests: 53 unit tests (stdlib `unittest`, no network/root) and an end-to-end
+* Tests: 57 unit tests (stdlib `unittest`, no network/root) and an end-to-end
   integration test against a bundled mock AbuseIPDB API.
 * CI: unit tests on Python 3.9-3.13, shellcheck, staged install/uninstall.
 

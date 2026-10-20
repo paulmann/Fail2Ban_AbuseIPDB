@@ -24,11 +24,14 @@ scheduled worker.
   16 automatically.
 - **Privacy by design** - no attempted usernames, no mail content, no client
   domains in reports.
+- **Self-advertising footer** - every report ends with a configurable credit
+  (`Reported via Fail2Ban_AbuseIPDB Monitor: ...`), appended after truncation
+  so it is always visible; disable it with `attribution = no`.
 - **Rate-limit aware** - one report per IP per 20 minutes, 900/day, 25/run.
 - **Production installer** - backups, `fail2ban-client -t` gate, staging mode,
   idempotent upgrade, state-driven uninstall and `--purge`.
 - **Zero dependencies** - Python standard library only.
-- **Tested** - 53 unit tests, an end-to-end integration test against a mock API,
+- **Tested** - 57 unit tests, an end-to-end integration test against a mock API,
   shellcheck and a staged install/uninstall job in CI.
 
 ### Requirements

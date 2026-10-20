@@ -37,8 +37,37 @@ is the `ABUSEIPDB_REPORTER_CONFIG` environment variable.
 |---|---|---|
 | `server_ip` | *(auto-detected by the installer)* | shown in the comment as the reporting server |
 | `hostname` | *(auto-detected)* | reserved for comments/logs |
+| `attribution` | `yes` | append the project credit to every report |
+| `attribution_text` | `Reported via Fail2Ban_AbuseIPDB Monitor: https://github.com/paulmann/Fail2Ban_AbuseIPDB` | text of the credit; replace it with your own link or a neutral phrase |
 
-Both options are informational only. Leave them empty to omit the server line.
+`server_ip` and `hostname` are informational only. Leave them empty to omit the
+server line.
+
+### Attribution footer
+
+Every report ends with a small credit:
+
+```
+--
+Reported via Fail2Ban_AbuseIPDB Monitor: https://github.com/paulmann/Fail2Ban_AbuseIPDB
+```
+
+AbuseIPDB comments are public, so this is how the project gets discovered by
+other administrators. The footer is appended **after** the body is truncated and
+is therefore never cut off, even with a very small `comment_max_bytes`. Disable
+it for neutral reports:
+
+```ini
+[report]
+attribution = no
+```
+
+or replace it with your own text/link:
+
+```ini
+[report]
+attribution_text = Reported by ACME edge scanner
+```
 
 ## `[ignore]`
 
@@ -103,7 +132,9 @@ Patterns: PAM authentication failures; root password attempts; invalid usernames
 Log evidence:
   sshd-session[123]: pam_unix(sshd:auth): authentication failure; ... rhost=198.51.100.7
   sshd-session[123]: Failed password for root from 198.51.100.7 port 22 ssh2
-Reported automatically; no personal data included.
+No personal data included.
+--
+Reported via Fail2Ban_AbuseIPDB Monitor: https://github.com/paulmann/Fail2Ban_AbuseIPDB
 ```
 
 For web jails the evidence block contains the attacker's own requests

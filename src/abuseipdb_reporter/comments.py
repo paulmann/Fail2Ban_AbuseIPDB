@@ -133,9 +133,20 @@ def build_comment(
             "  " + evidence.clean_line(value)[:150]
             for value in fallback_lines[: int(cfg.evidence_max_lines)]
         )
-    parts.append("Reported automatically; no personal data included.")
+    parts.append("No personal data included.")
 
-    comment = truncate_bytes("\n".join(parts), int(cfg.comment_max_bytes))
+    body = "\n".join(parts)
+    limit = int(cfg.comment_max_bytes)
+    footer = cfg.attribution_text.strip() if cfg.attribution else ""
+    if footer:
+        tail = "\n--\n" + footer
+        tail_size = len(tail.encode("utf-8"))
+        if tail_size + 20 <= limit:
+            comment = truncate_bytes(body, limit - tail_size) + tail
+        else:  # a pathologically small limit: keep the body, drop the footer
+            comment = truncate_bytes(body, limit)
+    else:
+        comment = truncate_bytes(body, limit)
 
     categories = categories_for(cfg, jails)
     if sqli and 16 not in categories:

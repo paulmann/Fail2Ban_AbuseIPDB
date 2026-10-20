@@ -39,7 +39,7 @@ class CommentTests(TempDirTestCase):
         self.assertIn("jails: sshd", comment)
         self.assertIn("4 failed attempts", comment)
         self.assertIn("Patterns:", comment)
-        self.assertIn("no personal data", comment)
+        self.assertIn("No personal data included.", comment)
         self.assertEqual(categories, [18, 22])
         self.assertEqual(timestamp, comments.iso(now - 60))
 
@@ -113,6 +113,55 @@ class CommentTests(TempDirTestCase):
             now=now,
         )
         self.assertLessEqual(len(comment.encode("utf-8")), 300)
+
+    def test_attribution_footer_is_last_line(self):
+        now = 1700000000
+        comment, _, _ = comments.build_comment(
+            self.cfg, "198.51.100.7", [event(now)], ["sshd"], {}, now=now
+        )
+        self.assertIn("Fail2Ban_AbuseIPDB Monitor", comment)
+        self.assertIn("https://github.com/paulmann/Fail2Ban_AbuseIPDB", comment)
+        self.assertTrue(comment.rstrip().endswith("https://github.com/paulmann/Fail2Ban_AbuseIPDB"))
+        expected = self.cfg.attribution_text
+        self.assertEqual(comment.splitlines()[-1], expected)
+
+    def test_attribution_can_be_disabled(self):
+        self.cfg.attribution = False
+        now = 1700000000
+        comment, _, _ = comments.build_comment(
+            self.cfg, "198.51.100.7", [event(now)], ["sshd"], {}, now=now
+        )
+        self.assertNotIn("github.com/paulmann/Fail2Ban_AbuseIPDB", comment)
+        self.assertNotIn("Reported via", comment)
+
+    def test_attribution_survives_truncation(self):
+        self.cfg.comment_max_bytes = 180
+        self.cfg.evidence_max_lines = 10
+        now = 1700000000
+        lines = {
+            "nginx-attack-scan": [
+                'x - - [02/Jan/2026:00:00:00 +0000] "GET /%s HTTP/1.1" 404 0' % ("a" * 200)
+                for _ in range(5)
+            ]
+        }
+        comment, _, _ = comments.build_comment(
+            self.cfg,
+            "198.51.100.7",
+            [event(now, jail="nginx-attack-scan")],
+            ["nginx-attack-scan"],
+            lines,
+            now=now,
+        )
+        self.assertLessEqual(len(comment.encode("utf-8")), 180)
+        self.assertTrue(comment.endswith("https://github.com/paulmann/Fail2Ban_AbuseIPDB"))
+
+    def test_custom_attribution_text(self):
+        self.cfg.attribution_text = "Reported by Example Corp scanner"
+        now = 1700000000
+        comment, _, _ = comments.build_comment(
+            self.cfg, "198.51.100.7", [event(now)], ["sshd"], {}, now=now
+        )
+        self.assertTrue(comment.endswith("Reported by Example Corp scanner"))
 
     def test_old_backlog_timestamp_is_now(self):
         now = 1700000000

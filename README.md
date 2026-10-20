@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](pyproject.toml)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20systemd%20%7C%20cron-lightgrey.svg)](#compatibility)
-[![Tests](https://img.shields.io/badge/tests-53%20passing-brightgreen.svg)](tests)
+[![Tests](https://img.shields.io/badge/tests-57%20passing-brightgreen.svg)](tests)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 > **Asynchronous fail2ban → AbuseIPDB reporting.**
@@ -92,6 +92,7 @@ flowchart LR
 | 🏷️ **Correct categories** | Per-jail category map; SQL-injection attempts automatically add category 16. |
 | 🛡️ **No command injection** | Attacker-controlled log text is never passed to a shell. |
 | 🔒 **PII-free** | No attempted usernames, no mail content, no client domains - only the attacker's IP and requests. |
+| 📣 **Self-advertising footer** | Every report ends with a configurable attribution line - `Reported via Fail2Ban_AbuseIPDB Monitor: https://github.com/paulmann/Fail2Ban_AbuseIPDB` - so the project spreads with every ban it reports. Disable it with one option. |
 | 👁️ **Observable** | `--stats`, `--dry-run`, `--check-key`, structured log, logrotate config. |
 | 🧪 **Tested** | 53 unit tests + an end-to-end integration test against a mock API, plus a shellcheck/CI gate. |
 | ♻️ **Safe installer** | Backups every replaced file, `fail2ban-client -t` before restart, state-driven uninstall, staging mode. |
@@ -204,6 +205,8 @@ retention_days = 30
 
 [report]
 server_ip = 203.0.113.10
+attribution = yes             # footer that advertises this project
+attribution_text = Reported via Fail2Ban_AbuseIPDB Monitor: https://github.com/paulmann/Fail2Ban_AbuseIPDB
 
 [ignore]
 # private/loopback/reserved + your own management networks + CDN ranges
@@ -249,7 +252,9 @@ Patterns: PAM authentication failures; root password attempts; invalid usernames
 Log evidence:
   sshd-session[123]: pam_unix(sshd:auth): authentication failure; ... rhost=198.51.100.7 user=root
   sshd-session[123]: Failed password for root from 198.51.100.7 port 22 ssh2
-Reported automatically; no personal data included.
+No personal data included.
+--
+Reported via Fail2Ban_AbuseIPDB Monitor: https://github.com/paulmann/Fail2Ban_AbuseIPDB
 ```
 
 Web application scanning:
@@ -265,7 +270,9 @@ Sample requests/indicators:
   GET /.git/config -> 404
   GET /wp-admin/install.php?step=1 -> 404
   GET /api/v1/items?id=1%20UNION%20SELECT%20@@version -> 404
-Reported automatically; no personal data included.
+No personal data included.
+--
+Reported via Fail2Ban_AbuseIPDB Monitor: https://github.com/paulmann/Fail2Ban_AbuseIPDB
 ```
 
 ---
@@ -403,6 +410,12 @@ request there is enough. Rate/error handling is status-code based.
 **Where are the reports if the queue is full?**
 On disk, in `/var/lib/abuseipdb/abuseipdb.sqlite3` (`events.reported = 0`). They
 are drained in order, oldest first, up to the configured budgets.
+
+**Why does every report contain a link to this project?**
+That is the `[report] attribution` footer - a small, factual credit that makes
+the project discoverable through public AbuseIPDB comments. It never replaces
+evidence and is always the last line, even when the comment is truncated. Set
+`attribution = no` to disable it or `attribution_text` to put your own link.
 
 ---
 

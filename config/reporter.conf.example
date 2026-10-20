@@ -54,6 +54,12 @@ max_attempts = 10
 server_ip = 203.0.113.10
 hostname = fail2ban-host
 
+# Attribution footer appended to every report.  AbuseIPDB comments are public,
+# so this small credit is also how the project gets discovered.  Set to "no"
+# for a fully neutral report, or replace the text with your own link.
+attribution = yes
+attribution_text = Reported via Fail2Ban_AbuseIPDB Monitor: https://github.com/paulmann/Fail2Ban_AbuseIPDB
+
 [ignore]
 # Never report these addresses: our own and trusted hosts, private, loopback,
 # reserved, documentation networks and CDN ranges that proxy other people's

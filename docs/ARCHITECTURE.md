@@ -84,7 +84,9 @@ root. This project deliberately passes only `<ip>`, `<name>`, `<bantime>` and
 3. Stop when the daily budget (`max_reports_per_day`) or the per-run budget
    (`max_reports_per_run`) is exhausted.
 4. Build the comment from the jails, counters, generic patterns and - for web
-   jails - the attacker's URLs. No usernames, no mail content.
+   jails - the attacker's URLs. No usernames, no mail content. The body is
+   truncated first, then the attribution footer is appended, so the project
+   credit survives any `comment_max_bytes` value.
 5. `POST /api/v2/report` with `ip`, `categories`, `timestamp`, `comment`.
 6. Interpret the response:
 

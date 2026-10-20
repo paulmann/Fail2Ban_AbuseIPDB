@@ -88,6 +88,9 @@ assert len(payloads) == 1, payloads
 payload = payloads[0]
 assert payload["ip"] == "198.51.100.7"
 assert "GET /.env -> 404" in payload["comment"], payload["comment"]
+assert payload["comment"].endswith(
+    "Reported via Fail2Ban_AbuseIPDB Monitor: https://github.com/paulmann/Fail2Ban_AbuseIPDB"
+), payload["comment"]
 assert len(payload["comment"].encode()) <= 1000
 print("dry-run payload OK (%d bytes)" % len(payload["comment"].encode()))
 PY

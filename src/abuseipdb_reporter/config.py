@@ -19,6 +19,12 @@ DEFAULT_FAIL2BAN_DB = "/var/lib/fail2ban/fail2ban.sqlite3"
 DEFAULT_API_URL = "https://api.abuseipdb.com/api/v2/report"
 DEFAULT_CHECK_URL = "https://api.abuseipdb.com/api/v2/check"
 
+#: Footer appended to every report.  AbuseIPDB comments are public, so this is a
+#: tiny, factual attribution that also helps the project get discovered.
+DEFAULT_ATTRIBUTION = (
+    "Reported via Fail2Ban_AbuseIPDB Monitor: https://github.com/paulmann/Fail2Ban_AbuseIPDB"
+)
+
 #: Default AbuseIPDB categories per fail2ban jail.
 #: https://www.abuseipdb.com/categories
 DEFAULT_CATEGORY_MAP: Dict[str, str] = {
@@ -91,6 +97,8 @@ class Config:
     max_attempts: int = 10
     server_ip: str = ""
     hostname: str = ""
+    attribution: bool = True
+    attribution_text: str = DEFAULT_ATTRIBUTION
     log_path: str = DEFAULT_LOG_PATH
     ignore_ranges: Tuple[ipaddress._BaseNetwork, ...] = ()
     category_map: Dict[str, str] = field(default_factory=dict)
@@ -155,6 +163,9 @@ def load_config(path: Optional[str] = None, quiet: bool = False) -> Config:
         max_attempts=_as_int(get("database", "max_attempts", "10"), 10),
         server_ip=get("report", "server_ip", "").strip(),
         hostname=get("report", "hostname", "").strip(),
+        attribution=_as_bool(get("report", "attribution", "yes"), True),
+        attribution_text=get("report", "attribution_text", DEFAULT_ATTRIBUTION).strip()
+        or DEFAULT_ATTRIBUTION,
         log_path=get("logging", "path", DEFAULT_LOG_PATH).strip() or DEFAULT_LOG_PATH,
         ignore_ranges=parse_ranges(ranges_raw),
         category_map=category_map,
