@@ -22,6 +22,11 @@ cd Fail2Ban_AbuseIPDB
 sudo ./install.sh --api-key "YOUR_ABUSEIPDB_API_KEY"
 ```
 
+On a terminal `--api-key` may be omitted: the installer asks for the key once
+and saves it to `/etc/abuseipdb/.abuseipdb.key` (mode 600). The key is kept in
+that file - not in the config - so re-installing and self-updating never
+overwrite it.
+
 The default attaches the action to the `sshd` jail only. To report web attacks
 as well, list the jails you actually have:
 
@@ -47,7 +52,9 @@ jails you pass.
 |---|---|
 | `--api-key KEY` | AbuseIPDB API key (alternatively `ABUSEIPDB_API_KEY` env or `--api-key-file`) |
 | `--api-key-file FILE` | read the key from the first line of a file |
-| `--jails "LIST"` | space separated jails to attach the action to (default `sshd`) |
+| `--key-file PATH` | API key file location (default `/etc/abuseipdb/.abuseipdb.key`) |
+| `--with-update-check` | install a weekly `abuseipdb-upgrade --check` timer/cron (check only) |
+| `--jails "LIST"` | space separated jails to attach the action to (default: existing jails on upgrade, `sshd` on a fresh install) |
 | `--all-jails` | attach to every enabled jail (except `recidive`) |
 | `--server-ip IP` | value written to `server_ip` (shown in report comments) |
 | `--report-hostname NAME` | value written to `hostname` |
@@ -69,7 +76,9 @@ jails you pass.
 | `/usr/local/lib/abuseipdb_reporter/` | Python package (standard library only) |
 | `/usr/local/sbin/abuseipdb-report` | worker: sends queued reports (timer/cron) |
 | `/usr/local/sbin/abuseipdb-enqueue` | queue helper, called by the fail2ban action |
-| `/etc/abuseipdb/reporter.conf` | configuration, **mode 600** (contains the API key) |
+| `/usr/local/sbin/abuseipdb-upgrade` | self-update client (`--check` / `--upgrade`) |
+| `/etc/abuseipdb/reporter.conf` | configuration, **mode 600** (no secrets) |
+| `/etc/abuseipdb/.abuseipdb.key` | API key, **mode 600**, never touched by updates |
 | `/var/lib/abuseipdb/abuseipdb.sqlite3` | local queue and report journal |
 | `/var/lib/fail2ban-abuseipdb/install-state` | state of the first installation, for clean uninstall |
 | `/var/backups/fail2ban-abuseipdb/pristine-<timestamp>/` | copies of files that existed before the first installation |
@@ -87,15 +96,18 @@ jails you pass.
 fail2ban-client get sshd actions
 #    ... has the following actions: nftables, abuseipdb-async
 
-# 2. Queue a ban (use a real attacker address from your logs, NOT your own IP!)
+# 2. Check where the API key comes from
+/usr/local/sbin/abuseipdb-report --key-status
+
+# 3. Queue a ban (use a real attacker address from your logs, NOT your own IP!)
 /usr/local/sbin/abuseipdb-enqueue --ip 198.51.100.7 --jail sshd \
   --bantime 86400 --failures 4
 
-# 3. Inspect queue and payload without sending anything
+# 4. Inspect queue and payload without sending anything
 /usr/local/sbin/abuseipdb-report --stats
 /usr/local/sbin/abuseipdb-report --dry-run
 
-# 4. Send it and watch the result
+# 5. Send it and watch the result
 /usr/local/sbin/abuseipdb-report
 tail -n 20 /var/log/abuseipdb-reporter.log
 ```
@@ -150,19 +162,28 @@ anywhere is harmless, but it is cleaner to keep it in sync).
 
 ## Upgrade
 
+Two supported ways:
+
 ```bash
+# 1. self-update (checks updater.json on GitHub, verifies SHA-256, runs the installer)
+sudo /usr/local/sbin/abuseipdb-upgrade --check
+sudo /usr/local/sbin/abuseipdb-upgrade --upgrade
+
+# 2. from a fresh checkout (installer detects the configured jails)
 git pull
-sudo ./install.sh --api-key "YOUR_ABUSEIPDB_API_KEY" --jails "sshd nginx-attack-scan"
+sudo ./install.sh
 ```
 
-The existing `reporter.conf` and the queue are preserved. The previous version of
-every replaced file is stored under `/var/backups/fail2ban-abuseipdb/<timestamp>/`.
+Both keep the key file, `reporter.conf`, the queue and the list of jails. The
+previous version of every replaced file is stored under
+`/var/backups/fail2ban-abuseipdb/pristine-<timestamp>/`. See
+[UPDATE.md](UPDATE.md) for the updater design and safety rules.
 
 ## Uninstall
 
 ```bash
-sudo ./install.sh --uninstall          # keeps config, queue and logs
-sudo ./install.sh --uninstall --purge  # removes everything, including data
+sudo ./install.sh --uninstall          # keeps config, queue, key and logs
+sudo ./install.sh --uninstall --purge  # removes everything, including the key
 ```
 
 Uninstall restores the files that existed before the installation (from the

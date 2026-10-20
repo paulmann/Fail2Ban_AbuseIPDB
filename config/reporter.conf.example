@@ -4,9 +4,15 @@
 # ============================================================================
 
 [abuseipdb]
-# Your AbuseIPDB API key (https://www.abuseipdb.com/account/api).
-# Keep this file chmod 600 root:root - the key is a secret.
-api_key = YOUR_ABUSEIPDB_API_KEY
+# The API key lives in a separate file so that updates and configuration
+# regeneration can never overwrite it.  The installer (or
+# `abuseipdb-report --setup` on the first run) creates it with mode 600.
+# https://www.abuseipdb.com/account/api
+api_key_file = /etc/abuseipdb/.abuseipdb.key
+
+# Legacy location (deprecated).  If a key is still here, the reporter uses it
+# and `abuseipdb-report --migrate-key` moves it into the key file.
+api_key =
 
 # API endpoints (change only for testing/proxying).
 api_url = https://api.abuseipdb.com/api/v2/report
@@ -59,6 +65,10 @@ hostname = fail2ban-host
 # for a fully neutral report, or replace the text with your own link.
 attribution = yes
 attribution_text = Reported via Fail2Ban_AbuseIPDB Monitor: https://github.com/paulmann/Fail2Ban_AbuseIPDB
+
+[update]
+# Manifest used by `abuseipdb-upgrade --check/--upgrade`.
+manifest_url = https://raw.githubusercontent.com/paulmann/Fail2Ban_AbuseIPDB/main/updater.json
 
 [ignore]
 # Never report these addresses: our own and trusted hosts, private, loopback,

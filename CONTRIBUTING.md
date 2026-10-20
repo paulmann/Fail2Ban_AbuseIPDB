@@ -27,6 +27,11 @@ network or the firewall.
   never to a command line.
 * **No PII in reports.** Attempted usernames, mail content and client domains
   must not be sent.
+* **Secrets never enter the repository or the config.** The API key lives in the
+  key file (`.abuseipdb.key`, mode 600); `*.key` is git-ignored. Updates must
+  never overwrite an existing key file.
+* **Updates must be verifiable.** Any change to the updater or the installer
+  must keep the SHA-256 check, the safe extractor and the key-file snapshot.
 * **Backwards-compatible configuration.** New options get safe defaults; existing
   keys keep working.
 
@@ -44,6 +49,8 @@ The test suite is the contract:
 | `tests/test_api.py` | HTTP client against a local server |
 | `tests/test_enqueue.py` | address validation, ignore rules, skipped jails |
 | `tests/test_cli.py` | CLI entry points and output |
+| `tests/test_keys.py` | key resolution order, prompt, storage, migration |
+| `tests/test_updater.py` | version comparison, manifest, SHA-256, safe extraction, key preservation |
 | `tests/integration/run_integration.sh` | real worker + queue + mock API end-to-end |
 
 Any change in behaviour needs a test. Keep the tests offline and runnable

@@ -23,7 +23,9 @@ class ConfigTests(unittest.TestCase):
     def test_example_config_is_parsable(self):
         path = os.path.join(REPO_ROOT, "config", "reporter.conf.example")
         cfg = load_config(path)
-        self.assertEqual(cfg.api_key, "YOUR_ABUSEIPDB_API_KEY")
+        self.assertEqual(cfg.api_key, "")
+        self.assertEqual(cfg.api_key_file, "/etc/abuseipdb/.abuseipdb.key")
+        self.assertIn("updater.json", cfg.update_manifest_url)
         self.assertEqual(cfg.categories_for("sshd"), [18, 22])
         self.assertEqual(cfg.categories_for("proftpd"), [5, 18])
         self.assertEqual(cfg.comment_max_bytes, 1000)
@@ -51,6 +53,15 @@ class ConfigTests(unittest.TestCase):
     def test_parse_ranges_ignores_garbage(self):
         networks = parse_ranges("10.0.0.0/8, not-a-network, 192.168.0.0/16")
         self.assertEqual(len(networks), 2)
+
+    def test_legacy_api_key_is_still_supported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "reporter.conf")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("[abuseipdb]\napi_key = legacy-key\napi_key_file = %s/key\n" % tmp)
+            cfg = load_config(path)
+        self.assertEqual(cfg.api_key, "legacy-key")
+        self.assertEqual(cfg.api_key_file, "%s/key" % tmp)
 
     def test_bad_values_fall_back_to_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:

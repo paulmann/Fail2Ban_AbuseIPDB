@@ -29,9 +29,12 @@ The reporter handles untrusted data (attacker IPs and log lines) and a secret
    fail2ban's SQLite database by the Python worker and is only placed inside the
    JSON/form comment. The stock `abuseipdb.conf` action interpolates `<matches>`;
    this project does not.
-2. **Secret isolation.** The API key is stored in `/etc/abuseipdb/reporter.conf`
-   with mode `600 root:root`, is not written to logs and is not part of the
-   fail2ban configuration.
+2. **Secret isolation.** The API key is stored in
+   `/etc/abuseipdb/.abuseipdb.key` with mode `600 root:root`, separately from
+   the configuration and the code. It is not written to logs, is not part of the
+   fail2ban configuration, is not included in release archives and is excluded
+   from git (`*.key`). An existing key file is never overwritten by an update;
+   the updater additionally snapshots and restores it if the installer fails.
 3. **Least privilege.** The worker runs as a oneshot systemd unit with
    `PrivateTmp=true`, `ProtectSystem=full`, `ProtectHome=true`,
    `NoNewPrivileges=true`; the only writable paths are `/var/lib/abuseipdb` and
@@ -42,7 +45,12 @@ The reporter handles untrusted data (attacker IPs and log lines) and a secret
 5. **No PII in reports.** Attempted usernames, mail content and client domains
    are not sent. Reports are public and must contain only evidence about the
    attacker.
-6. **Bounded remote interaction.** HTTP timeout, retry limit, daily/per-run
+6. **Self-update integrity.** The updater requires a SHA-256 checksum from
+   `updater.json`, refuses archives without one, rejects path traversal,
+   symlinks and device entries, and runs the project's own installer in a
+   temporary directory. The optional weekly check only reads the manifest; it
+   never installs automatically.
+7. **Bounded remote interaction.** HTTP timeout, retry limit, daily/per-run
    budgets and a per-IP throttle prevent an abused or compromised host from
    flooding AbuseIPDB.
 

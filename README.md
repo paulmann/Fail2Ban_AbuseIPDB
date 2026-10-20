@@ -1,11 +1,11 @@
 # Fail2Ban_AbuseIPDB
 
 [![CI](https://github.com/paulmann/Fail2Ban_AbuseIPDB/actions/workflows/ci.yml/badge.svg)](https://github.com/paulmann/Fail2Ban_AbuseIPDB/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](CHANGELOG.md)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](pyproject.toml)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20systemd%20%7C%20cron-lightgrey.svg)](#compatibility)
-[![Tests](https://img.shields.io/badge/tests-57%20passing-brightgreen.svg)](tests)
+[![Tests](https://img.shields.io/badge/tests-88%20passing-brightgreen.svg)](tests)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 > **Asynchronous fail2ban → AbuseIPDB reporting.**
@@ -86,6 +86,9 @@ flowchart LR
 |---|---|
 | 🔌 **Drop-in fail2ban action** | Attach to any jail - `sshd`, `nginx-*`, `proftpd`, `exim-*`, custom filters. The installer generates the jail snippet. |
 | 🧱 **Zero dependencies** | Python standard library only. No pip, no venv, no daemons. ~13 MB RSS per run. |
+| 🔑 **Key file, not config** | The API key lives in `/etc/abuseipdb/.abuseipdb.key` (mode 600), separate from code and configuration - updates can never overwrite it. |
+| 👋 **First-run wizard** | No key anywhere? The installer (or `abuseipdb-report --setup`) asks once, validates it and saves it to the key file. |
+| 🔄 **Self-update** | `abuseipdb-upgrade --check` compares the installed version with `updater.json` on GitHub; `--upgrade` verifies the SHA-256 of the release tarball, runs the installer and keeps config + key intact. |
 | 🗄️ **Durable queue** | SQLite (WAL) on disk; survives reboot; `Persistent=true` timer catches up missed ticks. |
 | 🚦 **Rate-limit aware** | One report per IP per 20 minutes, 900/day, 25/run - inside the free AbuseIPDB plan. |
 | 🧾 **Evidence-backed comments** | Attack type, time window, ban duration, failure count, generic patterns and the attacker's own URLs - read from fail2ban's database, no log scraping. |
@@ -107,6 +110,8 @@ cd Fail2Ban_AbuseIPDB
 
 # 1. Install (default: attach to the sshd jail)
 sudo ./install.sh --api-key "YOUR_ABUSEIPDB_API_KEY"
+#    or just `sudo ./install.sh` - on a terminal it asks for the key once and
+#    stores it in /etc/abuseipdb/.abuseipdb.key (mode 600)
 
 # 2. Report web and FTP attacks too (the jails you actually have)
 sudo ./install.sh --api-key "YOUR_ABUSEIPDB_API_KEY" \
@@ -152,8 +157,10 @@ sudo ./install.sh [--api-key KEY] [--jails "LIST"] [--all-jails] [options]
 
 | Option | Meaning |
 |---|---|
-| `--api-key KEY` / `--api-key-file FILE` | API key (or `ABUSEIPDB_API_KEY` env) |
-| `--jails "LIST"` | jails to attach the action to (default `sshd`) |
+| `--api-key KEY` / `--api-key-file FILE` | API key (or `ABUSEIPDB_API_KEY` env); saved to the key file |
+| `--key-file PATH` | key file (default `/etc/abuseipdb/.abuseipdb.key`) |
+| `--jails "LIST"` | jails to attach the action to (default on upgrade: the configured ones; fresh install: `sshd`) |
+| `--with-update-check` | weekly `abuseipdb-upgrade --check` timer/cron (check only, never auto-installs) |
 | `--all-jails` | every enabled jail except `recidive` |
 | `--cron` | cron instead of the systemd timer |
 | `--no-restart` | do not restart fail2ban |
@@ -169,6 +176,7 @@ Everything the installer writes:
 /usr/local/sbin/abuseipdb-report         worker
 /usr/local/sbin/abuseipdb-enqueue        queue helper
 /etc/abuseipdb/reporter.conf             configuration, mode 600
+/etc/abuseipdb/.abuseipdb.key            API key, mode 600 (preserved by updates)
 /var/lib/abuseipdb/abuseipdb.sqlite3     queue + report journal
 /etc/fail2ban/action.d/abuseipdb-async.conf
 /etc/fail2ban/jail.d/50-abuseipdb-reporter.local
@@ -190,7 +198,7 @@ restores the previous state using an install state file.
 
 ```ini
 [abuseipdb]
-api_key = YOUR_ABUSEIPDB_API_KEY
+api_key_file = /etc/abuseipdb/.abuseipdb.key   # separate file, survives updates
 enabled = yes
 min_interval_ip = 1200        # >= 900 required by AbuseIPDB
 max_reports_per_run = 25
@@ -287,7 +295,49 @@ abuseipdb-report --check-key     # validate the API key (one /check request)
 abuseipdb-report --config FILE   # alternative configuration file
 
 abuseipdb-enqueue --ip IP --jail JAIL --bantime SECONDS --failures N
+
+abuseipdb-report --setup          # first run: ask for the key and save it
+abuseipdb-report --migrate-key    # move a legacy api_key out of reporter.conf
+abuseipdb-report --key-status     # where the key comes from (masked)
+
+abuseipdb-upgrade --check         # 0 = up to date, 10 = update available
+abuseipdb-upgrade --upgrade       # verify SHA-256 and install the update
 ```
+
+### API key management
+
+The key is **never** stored in the code, the repository or the configuration
+file. Resolution order:
+
+1. `--api-key` (one-off, not persisted);
+2. `ABUSEIPDB_API_KEY` / `ABUSEIPDB_KEY` environment variables;
+3. the key file (`api_key_file`, default `/etc/abuseipdb/.abuseipdb.key`,
+   mode 600; `ABUSEIPDB_KEY_FILE` overrides the path);
+4. legacy `api_key` in `reporter.conf` (deprecated, migrated automatically by
+   the installer or `--migrate-key`);
+5. interactive prompt on the first interactive run - the key is validated and
+   saved to the key file.
+
+Updating the code, re-running the installer or using `abuseipdb-upgrade` never
+rewrites an existing key file: it is not part of the release tarball and the
+installer explicitly keeps it.
+
+### Self-update
+
+The repository publishes `updater.json` with the latest version, the release
+tarball URL and its SHA-256. `abuseipdb-upgrade` is installed next to the
+reporter:
+
+```bash
+abuseipdb-upgrade --check --json     # machine-readable check
+abuseipdb-upgrade --upgrade --yes    # download, verify SHA-256, run installer
+```
+
+The updater refuses archives without a checksum, rejects path traversal and
+device/link entries, snapshots the key file before the installer runs and
+restores it if anything goes wrong. Enable the optional weekly check with
+`--with-update-check`; it only reports availability, it never installs in the
+background.
 
 ---
 
@@ -407,6 +457,18 @@ well. The reporter also refuses non-public IPs before queueing.
 The two endpoints are isolated in `src/abuseipdb_reporter/api.py`; adjusting the
 request there is enough. Rate/error handling is status-code based.
 
+**Will an update overwrite my API key?**
+No. The key lives in `/etc/abuseipdb/.abuseipdb.key`, is not part of the release
+tarball and the installer keeps an existing key file untouched (verified by the
+CI upgrade test). If a legacy `api_key` is still in `reporter.conf`, it is
+migrated into the key file and the config line is blanked.
+
+**How do I update the installation?**
+`sudo abuseipdb-upgrade --check` to see whether a newer version exists, then
+`sudo abuseipdb-upgrade --upgrade`. Re-running `install.sh` from a fresh
+checkout does the same and also preserves the key, configuration, queue and
+the jail list.
+
 **Where are the reports if the queue is full?**
 On disk, in `/var/lib/abuseipdb/abuseipdb.sqlite3` (`events.reported = 0`). They
 are drained in order, oldest first, up to the configured budgets.
@@ -424,6 +486,7 @@ evidence and is always the last line, even when the comment is truncated. Set
 * [Installation](docs/INSTALL.md)
 * [Configuration](docs/CONFIGURATION.md)
 * [Architecture](docs/ARCHITECTURE.md)
+* [Self-update](docs/UPDATE.md)
 * [Troubleshooting](docs/TROUBLESHOOTING.md)
 * [Changelog](CHANGELOG.md)
 * [Contributing](CONTRIBUTING.md)

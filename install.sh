@@ -9,15 +9,18 @@
 set -euo pipefail
 
 PROG="$(basename "$0")"
-VERSION="1.0.0"
+VERSION="1.1.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 PREFIX="/usr/local"
 ROOT=""
 API_KEY="${ABUSEIPDB_API_KEY:-}"
 API_KEY_FILE=""
-JAILS="sshd"
+KEY_FILE="/etc/abuseipdb/.abuseipdb.key"
+JAILS=""
+JAILS_EXPLICIT=0
 ALL_JAILS=0
+WITH_UPDATE_CHECK=0
 DRY_RUN=0
 UNINSTALL=0
 PURGE=0
@@ -58,6 +61,82 @@ run() {
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# ---------------------------------------------------------------------------
+# API key handling
+#
+# The key lives in its own file (KEY_FILE) and is never part of the config or
+# of the code archive, so re-installing / self-updating cannot overwrite it.
+# ---------------------------------------------------------------------------
+key_target() { path "$KEY_FILE"; }
+
+key_file_value() {
+  local target
+  target="$(key_target)"
+  if [ -r "$target" ]; then
+    head -n 1 "$target" | tr -d '[:space:]'
+  fi
+}
+
+save_key_file() {
+  local key="$1" target
+  target="$(key_target)"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '[dry-run] write API key to %s (mode 600)
+' "$target"
+    return 0
+  fi
+  install -d -m 700 "$(dirname "$target")"
+  ( umask 077; printf '%s\n' "$key" > "$target" )
+  chmod 600 "$target"
+}
+
+legacy_config_key() {
+  local config
+  config="$(path "/etc/abuseipdb/reporter.conf")"
+  [ -r "$config" ] || return 0
+  sed -n 's/^[[:space:]]*api_key[[:space:]]*=[[:space:]]*\([^[:space:]]*\).*/\1/p' "$config" | head -n 1
+}
+
+# Resolve the key: --api-key > ABUSEIPDB_API_KEY > existing key file >
+# legacy api_key in the config > interactive prompt (first run).
+install_key() {
+  local key="" source=""
+  key="$(printf '%s' "$API_KEY" | tr -d '[:space:]')"
+  if [ -n "$key" ]; then
+    source="command line / environment"
+  else
+    key="$(key_file_value)"
+    [ -n "$key" ] && source="existing key file"
+  fi
+  if [ -z "$key" ]; then
+    key="$(legacy_config_key)"
+    key="$(printf '%s' "$key" | tr -d '[:space:]')"
+    [ -n "$key" ] && source="legacy api_key in reporter.conf (migrated)"
+  fi
+  if [ -z "$key" ]; then
+    if [ -t 0 ]; then
+      printf 'Enter your AbuseIPDB API key (input hidden, saved to %s): ' "$(key_target)" >&2
+      read -r -s key
+      printf '\n' >&2
+      key="$(printf '%s' "$key" | tr -d '[:space:]')"
+      [ -n "$key" ] || die "empty API key"
+      source="interactive prompt"
+    else
+      die "no API key: pass --api-key, set ABUSEIPDB_API_KEY, write $(key_target), or run interactively"
+    fi
+  fi
+  case "$key" in
+    *[!0-9a-fA-F]*) warn "API key contains non-hex characters - check it" ;;
+  esac
+  [ "${#key}" -eq 80 ] || warn "API key length is ${#key}, expected 80 - check it"
+  if [ "$source" = "existing key file" ]; then
+    info "existing API key file kept untouched: $(key_target)"
+    return 0
+  fi
+  save_key_file "$key"
+  info "API key configured ($source) in $(key_target)"
+}
+
 usage() {
   cat <<EOF
 Fail2Ban_AbuseIPDB installer v${VERSION}
@@ -67,18 +146,23 @@ an action queues every new ban in SQLite, a systemd timer (or cron) sends
 rich abuse reports to https://api.abuseipdb.com/api/v2/report.
 
 Usage:
-  sudo ./install.sh --api-key KEY [options]
+  sudo ./install.sh [--api-key KEY] [options]
 
-Required (first installation):
-  --api-key KEY          AbuseIPDB API key
+API key (first installation):
+  --api-key KEY          AbuseIPDB API key (saved to the key file, mode 600)
   --api-key-file FILE    read the key from a file (first line)
-                         (or set the ABUSEIPDB_API_KEY environment variable)
+                         (or set the ABUSEIPDB_API_KEY environment variable;
+                         on a terminal the installer asks for the key and saves it)
+  --key-file PATH        key file location (default: /etc/abuseipdb/.abuseipdb.key)
 
 Optional:
   --jails "LIST"         space separated fail2ban jails to attach the action to
-                         (default: "sshd")
+                         (default on upgrade: the jails already configured;
+                         on a fresh install: "sshd")
   --all-jails            attach to every enabled jail except aggregate jails
                          (recidive)
+  --with-update-check    install a weekly systemd timer/cron check for updates
+                         (abuseipdb-upgrade --check - check only, never installs automatically)
   --server-ip IP         value for "server_ip" in the report comment
   --report-hostname NAME value for "hostname" in the report comment
   --cron                 use cron instead of the systemd timer
@@ -109,8 +193,10 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --api-key)          API_KEY="${2:-}"; shift 2 ;;
     --api-key-file)     API_KEY_FILE="${2:-}"; shift 2 ;;
-    --jails)            JAILS="${2:-}"; shift 2 ;;
-    --all-jails)        ALL_JAILS=1; shift ;;
+    --key-file)         KEY_FILE="${2:-}"; shift 2 ;;
+    --jails)            JAILS="${2:-}"; JAILS_EXPLICIT=1; shift 2 ;;
+    --all-jails)        ALL_JAILS=1; JAILS_EXPLICIT=1; shift ;;
+    --with-update-check) WITH_UPDATE_CHECK=1; shift ;;
     --server-ip)        SERVER_IP="${2:-}"; shift 2 ;;
     --report-hostname)  REPORT_HOSTNAME="${2:-}"; shift 2 ;;
     --cron)             USE_CRON=1; shift ;;
@@ -169,7 +255,9 @@ check_layout() {
   for item in src/abuseipdb_reporter config/reporter.conf.example \
               fail2ban/action.d/abuseipdb-async.conf systemd/abuseipdb-report.service \
               systemd/abuseipdb-report.timer logrotate/abuseipdb-reporter cron/abuseipdb-reporter \
-              bin/abuseipdb-enqueue bin/abuseipdb-report; do
+              systemd/abuseipdb-upgrade-check.service systemd/abuseipdb-upgrade-check.timer \
+              cron/abuseipdb-upgrade-check updater.json \
+              bin/abuseipdb-enqueue bin/abuseipdb-report bin/abuseipdb-upgrade; do
     if [ ! -e "$SCRIPT_DIR/$item" ]; then
       warn "missing project file: $item"
       missing=1
@@ -188,6 +276,17 @@ detect_jails() {
       info "detected jails: $JAILS"
     else
       warn "could not detect jails, falling back to sshd"
+      JAILS="sshd"
+    fi
+  elif [ "$JAILS_EXPLICIT" -eq 0 ]; then
+    local existing
+    existing="$(path "/etc/fail2ban/jail.d/50-abuseipdb-reporter.local")"
+    if [ -r "$existing" ]; then
+      JAILS="$(sed -n 's/^\[\([^]]*\)\][[:space:]]*$/\1/p' "$existing" \
+        | grep -v '^DEFAULT$' | tr '\n' ' ' || true)"
+      [ -n "$JAILS" ] || JAILS="sshd"
+      info "upgrade: keeping already configured jails: $JAILS"
+    else
       JAILS="sshd"
     fi
   fi
@@ -273,40 +372,34 @@ install_code() {
   fi
   install_file "$SCRIPT_DIR/bin/abuseipdb-enqueue" "$(path "$PREFIX/sbin/abuseipdb-enqueue")" 755
   install_file "$SCRIPT_DIR/bin/abuseipdb-report"  "$(path "$PREFIX/sbin/abuseipdb-report")"  755
+  install_file "$SCRIPT_DIR/bin/abuseipdb-upgrade" "$(path "$PREFIX/sbin/abuseipdb-upgrade")" 755
 }
 
 install_config() {
-  local target key
+  local target content tmp
   target="$(path "/etc/abuseipdb/reporter.conf")"
-  key="$API_KEY"
   if [ -e "$target" ]; then
-    if [ -n "$key" ]; then
-      if [ "$DRY_RUN" -eq 1 ]; then
-        printf '[dry-run] update api_key in %s\n' "$target"
-      else
-        local tmp
-        tmp="$(mktemp)"
-        awk -v key="$key" '/^api_key = / { print "api_key = " key; next } { print }' \
-          "$target" > "$tmp"
-        install -m 600 "$tmp" "$target"
-        rm -f "$tmp"
-        info "existing config kept, api_key updated: $target"
-      fi
-    else
-      info "existing config found, keeping it: $target"
+    if [ "$DRY_RUN" -eq 1 ]; then
+      printf '[dry-run] keep config, ensure api_key_file=%s and empty api_key in %s\n' "$KEY_FILE" "$target"
+      return 0
     fi
+    tmp="$(mktemp)"
+    awk -v keyfile="$KEY_FILE" '
+      BEGIN { in_abuseipdb = 0; key_line = 0 }
+      /^\[abuseipdb\][[:space:]]*$/ { in_abuseipdb = 1 }
+      /^\[/ && $0 !~ /^\[abuseipdb\]/ { in_abuseipdb = 0 }
+      /^[[:space:]]*api_key[[:space:]]*=/ { print "api_key ="; next }
+      /^[[:space:]]*api_key_file[[:space:]]*=/ { print "api_key_file = " keyfile; key_line = 1; next }
+      { print }
+      END { if (!key_line) print "api_key_file = " keyfile }
+    ' "$target" > "$tmp"
+    install -m 600 "$tmp" "$target"
+    rm -f "$tmp"
+    info "existing config kept (api_key_file=$KEY_FILE, legacy api_key cleared): $target"
     return 0
   fi
-  if [ -z "$key" ]; then
-    die "--api-key is required for the first installation"
-  fi
-  case "$key" in
-    *[!0-9a-fA-F]*) warn "API key contains non-hex characters - check it" ;;
-  esac
-  [ "${#key}" -eq 80 ] || warn "API key length is ${#key}, expected 80 - check it"
 
-  local content
-  content="$(sed -e "s|^api_key = .*|api_key = ${key}|" \
+  content="$(sed -e "s|^api_key_file = .*|api_key_file = ${KEY_FILE}|" \
                  -e "s|^server_ip = .*|server_ip = ${SERVER_IP:-$(hostname -I 2>/dev/null | awk '{print $1}')}|" \
                  -e "s|^hostname = .*|hostname = ${REPORT_HOSTNAME:-$(hostname -f 2>/dev/null || hostname)}|" \
                  "$SCRIPT_DIR/config/reporter.conf.example")"
@@ -352,6 +445,22 @@ install_scheduler() {
   fi
   install_file "$SCRIPT_DIR/logrotate/abuseipdb-reporter" \
                "$(path "/etc/logrotate.d/abuseipdb-reporter")" 644
+
+  if [ "$WITH_UPDATE_CHECK" -eq 1 ]; then
+    if [ "$USE_CRON" -eq 0 ] && [ -d /run/systemd/system ] && [ -z "$ROOT" ]; then
+      install_file "$SCRIPT_DIR/systemd/abuseipdb-upgrade-check.service" \
+                   "$(path "/etc/systemd/system/abuseipdb-upgrade-check.service")" 644
+      install_file "$SCRIPT_DIR/systemd/abuseipdb-upgrade-check.timer" \
+                   "$(path "/etc/systemd/system/abuseipdb-upgrade-check.timer")" 644
+      run systemctl daemon-reload
+      run systemctl enable --now abuseipdb-upgrade-check.timer
+      info "weekly update check enabled: abuseipdb-upgrade-check.timer"
+    else
+      install_file "$SCRIPT_DIR/cron/abuseipdb-upgrade-check" \
+                   "$(path "/etc/cron.d/abuseipdb-upgrade-check")" 644
+      info "weekly update check installed: /etc/cron.d/abuseipdb-upgrade-check"
+    fi
+  fi
 }
 
 restart_fail2ban() {
@@ -378,7 +487,7 @@ post_checks() {
   fi
   if [ "$SKIP_API_CHECK" -eq 0 ] && [ -x "$report_bin" ]; then
     info "validating the AbuseIPDB API key (one check request)..."
-    if "$report_bin" --check-key >/tmp/.abuseipdb-check.$$ 2>&1; then
+    if "$report_bin" --check-key --no-prompt >/tmp/.abuseipdb-check.$$ 2>&1; then
       info "API key is valid"
     else
       warn "API key check failed:"
@@ -393,8 +502,10 @@ print_summary() {
 
 $(printf '%s' "$c_green")Fail2Ban_AbuseIPDB installed$(printf '%s' "$c_reset")
 
-  code:      $PREFIX/lib/abuseipdb_reporter, $PREFIX/sbin/abuseipdb-report, $PREFIX/sbin/abuseipdb-enqueue
+  code:      $PREFIX/lib/abuseipdb_reporter, $PREFIX/sbin/abuseipdb-report
+             $PREFIX/sbin/abuseipdb-enqueue, $PREFIX/sbin/abuseipdb-upgrade
   config:    /etc/abuseipdb/reporter.conf (mode 600)
+  api key:   $KEY_FILE (mode 600, never overwritten by updates)
   queue:     /var/lib/abuseipdb/abuseipdb.sqlite3
   fail2ban:  action /etc/fail2ban/action.d/abuseipdb-async.conf
              attached to jails: $(printf '%s' "$JAILS")
@@ -406,6 +517,8 @@ Useful commands:
   $PREFIX/sbin/abuseipdb-report --stats
   $PREFIX/sbin/abuseipdb-report --dry-run
   $PREFIX/sbin/abuseipdb-report --check-key
+  $PREFIX/sbin/abuseipdb-upgrade --check            # self-update check
+  $PREFIX/sbin/abuseipdb-upgrade --upgrade          # install the update
   systemctl list-timers abuseipdb-report.timer      # when systemd is used
   tail -f /var/log/abuseipdb-reporter.log
 
@@ -424,6 +537,7 @@ uninstall() {
   if [ -z "$ROOT" ]; then
     if have systemctl; then
       run systemctl disable --now abuseipdb-report.timer 2>/dev/null || true
+      run systemctl disable --now abuseipdb-upgrade-check.timer 2>/dev/null || true
     fi
   fi
 
@@ -453,7 +567,10 @@ uninstall() {
     run rm -f "$(path "/etc/fail2ban/jail.d/50-abuseipdb-reporter.local")"
     run rm -f "$(path "/etc/systemd/system/abuseipdb-report.service")" \
                "$(path "/etc/systemd/system/abuseipdb-report.timer")"
+    run rm -f "$(path "/etc/systemd/system/abuseipdb-upgrade-check.service")" \
+               "$(path "/etc/systemd/system/abuseipdb-upgrade-check.timer")"
     run rm -f "$(path "/etc/cron.d/abuseipdb-reporter")" \
+               "$(path "/etc/cron.d/abuseipdb-upgrade-check")" \
                "$(path "/etc/logrotate.d/abuseipdb-reporter")"
   fi
 
@@ -480,7 +597,7 @@ uninstall() {
     run rm -rf "$(path "/var/backups/fail2ban-abuseipdb")"
     info "configuration, queue and logs removed (--purge)"
   else
-    info "configuration and queue kept; remove them with --purge"
+    info "configuration, queue and API key file kept; remove them with --purge"
   fi
   info "original files (if any) kept in: $PRISTINE"
 }
@@ -511,6 +628,7 @@ main() {
   info "installing to ${ROOT:-/} (PREFIX=$PREFIX, jails: $JAILS)"
   prepare_dirs
   install_code
+  install_key
   install_config
   install_fail2ban
   install_scheduler

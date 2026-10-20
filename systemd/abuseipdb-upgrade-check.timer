@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly Fail2Ban_AbuseIPDB update check
+
+[Timer]
+OnCalendar=Mon *-*-* 04:30:00
+RandomizedDelaySec=30min
+Persistent=true
+Unit=abuseipdb-upgrade-check.service
+
+[Install]
+WantedBy=timers.target

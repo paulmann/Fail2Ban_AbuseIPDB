@@ -51,9 +51,12 @@ db.commit()
 db.close()
 PY
 
+printf '%s\n' "integration-test-key" > "$WORK/.abuseipdb.key"
+chmod 600 "$WORK/.abuseipdb.key"
+
 cat > "$WORK/reporter.conf" <<EOF
 [abuseipdb]
-api_key = integration-test-key
+api_key_file = $WORK/.abuseipdb.key
 api_url = http://127.0.0.1:${PORT}/api/v2/report
 check_url = http://127.0.0.1:${PORT}/api/v2/check
 timeout = 5
@@ -130,6 +133,40 @@ assert states["203.0.113.250"] == 0, "429 must stay pending"
 assert states["203.0.113.251"] == 2, "422 must be marked invalid"
 assert states["203.0.113.252"] == 1, "500 must be retried and then succeed"
 print("failure-mode handling OK")
+PY
+
+echo "== key file must survive all runs untouched"
+python3 - "$WORK" <<'PY'
+import os, stat, sys
+work = sys.argv[1]
+path = os.path.join(work, ".abuseipdb.key")
+assert open(path, "r", encoding="utf-8").read().strip() == "integration-test-key"
+assert os.stat(path).st_mode & 0o777 == 0o600
+print("key file content and mode OK")
+PY
+
+echo "== updater check against a local manifest"
+mkdir -p "$WORK/www"
+cat > "$WORK/www/updater.json" <<EOF
+{"version": "9.9.9", "tarball": "http://127.0.0.1:8901/release.tar.gz",
+ "sha256": "deadbeef", "release_notes": "http://example.invalid/release"}
+EOF
+python3 -m http.server 8901 --bind 127.0.0.1 --directory "$WORK/www" >"$WORK/http.log" 2>&1 &
+HTTP_PID=$!
+sleep 1
+set +e
+python3 bin/abuseipdb-upgrade --check --manifest-url "http://127.0.0.1:8901/updater.json" --json > "$WORK/update.json"
+RC=$?
+set -e
+kill "$HTTP_PID" 2>/dev/null || true
+python3 - "$WORK/update.json" "$RC" <<'PY'
+import json, sys
+payload = json.load(open(sys.argv[1]))
+code = int(sys.argv[2])
+assert code == 10, "expected exit code 10 (update available), got %s" % code
+assert payload["latest"] == "9.9.9", payload
+assert payload["update_available"] is True, payload
+print("updater check OK: current=%s latest=%s" % (payload["current"], payload["latest"]))
 PY
 
 echo

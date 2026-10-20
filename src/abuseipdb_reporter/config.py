@@ -18,6 +18,10 @@ DEFAULT_DB_PATH = "/var/lib/abuseipdb/abuseipdb.sqlite3"
 DEFAULT_FAIL2BAN_DB = "/var/lib/fail2ban/fail2ban.sqlite3"
 DEFAULT_API_URL = "https://api.abuseipdb.com/api/v2/report"
 DEFAULT_CHECK_URL = "https://api.abuseipdb.com/api/v2/check"
+DEFAULT_KEY_FILE = "/etc/abuseipdb/.abuseipdb.key"
+DEFAULT_UPDATE_MANIFEST_URL = (
+    "https://raw.githubusercontent.com/paulmann/Fail2Ban_AbuseIPDB/main/updater.json"
+)
 
 #: Footer appended to every report.  AbuseIPDB comments are public, so this is a
 #: tiny, factual attribution that also helps the project get discovered.
@@ -81,7 +85,8 @@ class Config:
 
     path: str = DEFAULT_CONFIG_PATH
     enabled: bool = True
-    api_key: str = ""
+    api_key: str = ""  # legacy: deprecated, use api_key_file
+    api_key_file: str = DEFAULT_KEY_FILE
     api_url: str = DEFAULT_API_URL
     check_url: str = DEFAULT_CHECK_URL
     timeout: int = 25
@@ -100,6 +105,7 @@ class Config:
     attribution: bool = True
     attribution_text: str = DEFAULT_ATTRIBUTION
     log_path: str = DEFAULT_LOG_PATH
+    update_manifest_url: str = DEFAULT_UPDATE_MANIFEST_URL
     ignore_ranges: Tuple[ipaddress._BaseNetwork, ...] = ()
     category_map: Dict[str, str] = field(default_factory=dict)
     quiet: bool = False
@@ -147,7 +153,11 @@ def load_config(path: Optional[str] = None, quiet: bool = False) -> Config:
         path=path,
         enabled=_as_bool(get("abuseipdb", "enabled", "yes"), True),
         api_key=get("abuseipdb", "api_key", "").strip(),
+        api_key_file=get("abuseipdb", "api_key_file", DEFAULT_KEY_FILE).strip()
+        or DEFAULT_KEY_FILE,
         api_url=get("abuseipdb", "api_url", DEFAULT_API_URL).strip(),
+        update_manifest_url=get("update", "manifest_url", DEFAULT_UPDATE_MANIFEST_URL).strip()
+        or DEFAULT_UPDATE_MANIFEST_URL,
         check_url=get("abuseipdb", "check_url", DEFAULT_CHECK_URL).strip(),
         timeout=_as_int(get("abuseipdb", "timeout", "25"), 25),
         min_interval_ip=_as_int(get("abuseipdb", "min_interval_ip", "1200"), 1200),

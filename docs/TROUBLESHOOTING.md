@@ -34,6 +34,34 @@ Work through the checklist in order:
 6. **Is the reporter enabled?**
    `enabled = no` in `reporter.conf` pauses sending (bans are still queued).
 
+## The first run asks for an API key / no key found
+
+The reporter resolves the key from `--api-key`, `ABUSEIPDB_API_KEY`, the key
+file (`/etc/abuseipdb/.abuseipdb.key`) or a legacy `api_key` in the config. On
+a terminal it asks once and saves the key to the key file. Under systemd/cron
+there is no terminal: if the key is missing the run logs
+`No AbuseIPDB API key found...` and exits with code 2.
+
+```bash
+abuseipdb-report --key-status     # where does the key come from?
+abuseipdb-report --setup          # ask for it and save it
+abuseipdb-report --migrate-key    # move a legacy api_key out of reporter.conf
+```
+
+The key file is mode 600 and is never rewritten by updates.
+
+## Updates
+
+```bash
+abuseipdb-upgrade --check         # 0 = up to date, 10 = update available, 1 = error
+abuseipdb-upgrade --upgrade       # verify SHA-256 and run the installer
+```
+
+If the check fails, verify egress to
+`raw.githubusercontent.com` / `github.com`. The updater refuses an archive
+without a checksum and aborts on a mismatch (nothing is installed, the key file
+is restored if it was touched).
+
 ## HTTP 401 / 403
 
 * `401` - the key is wrong or revoked. Update `api_key` in

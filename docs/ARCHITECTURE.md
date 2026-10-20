@@ -44,6 +44,43 @@ it later.
 | `src/abuseipdb_reporter/api.py` | urllib-based API client (no third-party dependencies) |
 | `src/abuseipdb_reporter/reporter.py` | the run loop and rate-limit policy |
 
+## API key storage
+
+The key is deliberately **not** part of `reporter.conf` and not part of the
+release tarball. It lives in `/etc/abuseipdb/.abuseipdb.key` (mode 600):
+
+* `install.sh` creates/migrates it once and keeps an existing file untouched;
+* `abuseipdb-upgrade` snapshots the key file before running the installer and
+  restores it if the installer fails;
+* the repository contains no key; `.gitignore` excludes `*.key`.
+
+Resolution order and the first-run prompt are described in
+[CONFIGURATION.md](CONFIGURATION.md#api-key-resolution).
+
+## Self-update
+
+`updater.json` in the repository root is the release manifest:
+
+```json
+{
+  "version": "1.1.0",
+  "tarball": "https://github.com/.../releases/download/v1.1.0/...tar.gz",
+  "sha256": "<checksum of the tarball>",
+  "release_notes": "https://github.com/.../releases/tag/v1.1.0"
+}
+```
+
+`abuseipdb-upgrade --check` compares `version` with the installed
+`__version__`. `--upgrade` downloads the tarball over HTTPS, **requires** a
+SHA-256 checksum, refuses archives without one, rejects absolute paths,
+`..` traversal, symlinks and device entries, extracts to a temporary directory
+and runs the bundled `install.sh`. The installer preserves the key, the config,
+the queue and the configured jails; on any failure the updater restores the key
+file from its snapshot.
+
+The optional weekly timer (`--with-update-check`) only runs `--check`; it never
+installs anything in the background.
+
 ## Local queue (SQLite, WAL)
 
 ```sql

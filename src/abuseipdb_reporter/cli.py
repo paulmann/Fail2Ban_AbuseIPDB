@@ -1,4 +1,4 @@
-"""Command line entry points for ``abuseipdb-report`` and ``abuseipdb-enqueue``."""
+"""Command line entry points for the reporter, the queue helper and the updater."""
 from __future__ import annotations
 
 import argparse
@@ -8,10 +8,10 @@ import sys
 import tempfile
 from typing import List, Optional
 
-from . import api, db, enqueue, log, reporter
+from . import api, db, enqueue, keys, log, reporter
 from .config import Config, load_config
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 #: Lock locations tried in order; the first writable one wins.  ``/run`` is the
 #: normal place for a system service, the fallbacks keep the tool usable by an
@@ -58,6 +58,7 @@ def acquire_lock(paths=None):
 
 
 def _stats_text(cfg: Config) -> str:
+    import datetime
     import sqlite3
     import time
 
@@ -65,8 +66,7 @@ def _stats_text(cfg: Config) -> str:
     try:
         now = int(time.time())
         midnight = int(
-            __import__("datetime")
-            .datetime.fromtimestamp(now)
+            datetime.datetime.fromtimestamp(now)
             .replace(hour=0, minute=0, second=0, microsecond=0)
             .timestamp()
         )
@@ -108,14 +108,41 @@ def _stats_text(cfg: Config) -> str:
     return "\n".join(lines)
 
 
-def _check_key(cfg: Config) -> int:
-    if not cfg.api_key:
-        print("api_key is empty")
-        return 1
-    status, body = api.check_key(cfg)
+def _key_status(cfg: Config) -> str:
+    try:
+        key, source = keys.resolve_api_key(cfg, prompt=False)
+    except keys.ApiKeyMissing:
+        return "API key not configured (expected at %s)" % keys.key_file_path(cfg)
+    return "API key source: %s\nkey: %s" % (source, keys.mask_key(key))
+
+
+def _check_key(cfg: Config, no_prompt: bool = False) -> int:
+    try:
+        key, source = keys.resolve_api_key(
+            cfg, prompt=not no_prompt, interactive=None
+        )
+    except keys.ApiKeyMissing as error:
+        print("error: %s" % error, file=sys.stderr)
+        return 2
+    api_cfg = cfg
+    api_cfg.api_key = key
+    status, body = api.check_key(api_cfg)
+    print("key source: %s" % source)
     print("HTTP %s" % status)
     print(body[:500])
     return 0 if status == 200 else 1
+
+
+def _resolve_key_for_run(cfg: Config, cli_key: Optional[str], no_prompt: bool) -> Optional[str]:
+    try:
+        key, source = keys.resolve_api_key(cfg, cli_key=cli_key, prompt=not no_prompt)
+    except keys.ApiKeyMissing as error:
+        log.log(cfg, "report: ERROR %s" % error)
+        return None
+    for warning in keys.validate_key(key):
+        log.log(cfg, "report: warning: %s" % warning)
+    log.log(cfg, "report: API key source: %s (%s)" % (source, keys.mask_key(key)))
+    return key
 
 
 def main_report(argv: Optional[List[str]] = None) -> int:
@@ -125,9 +152,22 @@ def main_report(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument("--config", default=None, help="path to reporter.conf")
     parser.add_argument("--db", default=None, help="override queue database path")
+    parser.add_argument("--api-key", default=None, help="one-off API key (not persisted)")
     parser.add_argument("--dry-run", action="store_true", help="build payloads, do not call the API")
     parser.add_argument("--check-key", action="store_true", help="validate the API key")
     parser.add_argument("--stats", action="store_true", help="print queue statistics")
+    parser.add_argument("--setup", action="store_true", help="ask for the API key and save it")
+    parser.add_argument(
+        "--migrate-key",
+        action="store_true",
+        help="move a legacy api_key from the config into the key file",
+    )
+    parser.add_argument("--key-status", action="store_true", help="show the API key source")
+    parser.add_argument(
+        "--no-prompt",
+        action="store_true",
+        help="never ask for the key interactively (for systemd/cron)",
+    )
     parser.add_argument("--version", action="version", version="%(prog)s " + __version__)
     args = parser.parse_args(argv)
 
@@ -135,21 +175,51 @@ def main_report(argv: Optional[List[str]] = None) -> int:
     if args.db:
         cfg.db_path = args.db
 
+    if args.setup:
+        try:
+            keys.prompt_and_save(keys.key_file_path(cfg))
+        except keys.ApiKeyMissing as error:
+            print("error: %s" % error, file=sys.stderr)
+            return 2
+        return 0
+
+    if args.migrate_key:
+        try:
+            migrated = keys.migrate_legacy_key(cfg, args.config or cfg.path)
+        except (RuntimeError, ValueError) as error:
+            print("error: %s" % error, file=sys.stderr)
+            return 1
+        print("Legacy api_key moved to %s" % keys.key_file_path(cfg) if migrated
+              else "No legacy api_key found; nothing to migrate")
+        return 0
+
+    if args.key_status:
+        print(_key_status(cfg))
+        return 0
+
     if args.stats:
         print(_stats_text(cfg))
         return 0
     if args.check_key:
-        return _check_key(cfg)
+        return _check_key(cfg, no_prompt=args.no_prompt)
 
-    lock = acquire_lock() if not args.dry_run else None
+    if args.dry_run:
+        result = reporter.run_once(cfg, dry_run=True)
+        for payload in result.payloads:
+            print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return 0
+
+    key = _resolve_key_for_run(cfg, args.api_key, args.no_prompt)
+    if key is None:
+        return 2
+    cfg.api_key = key
+
+    lock = acquire_lock()
     if lock is False:
         log.log(cfg, "report: another instance is running, skip")
         return 0
 
-    result = reporter.run_once(cfg, dry_run=args.dry_run)
-    if args.dry_run:
-        for payload in result.payloads:
-            print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    reporter.run_once(cfg)
     return 0
 
 
@@ -191,6 +261,12 @@ def main_enqueue(argv: Optional[List[str]] = None) -> int:
     except Exception as error:  # noqa: BLE001 - a ban must never fail because of reporting
         log.log(cfg, "enqueue: ERROR %r" % (error,))
     return 0
+
+
+def main_upgrade(argv: Optional[List[str]] = None) -> int:
+    from .updater import main_upgrade as _main_upgrade
+
+    return _main_upgrade(argv)
 
 
 if __name__ == "__main__":  # pragma: no cover

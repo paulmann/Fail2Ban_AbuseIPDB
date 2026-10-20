@@ -12,6 +12,8 @@ build/
 
 # Local configuration / secrets - never commit these
 reporter.conf
+.abuseipdb.key
+*.key
 *.secret
 .env
 

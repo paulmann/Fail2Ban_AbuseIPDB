@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+"""Check for and install Fail2Ban_AbuseIPDB updates from GitHub."""
+import os
+import sys
+
+sys.dont_write_bytecode = True  # keep /usr/local/lib clean (no __pycache__)
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+for _candidate in (
+    os.path.normpath(os.path.join(_HERE, "..", "lib")),  # /usr/local/sbin -> /usr/local/lib
+    "/usr/local/lib",
+    os.path.normpath(os.path.join(_HERE, "..", "src")),  # git checkout -> src/
+):
+    if os.path.isdir(os.path.join(_candidate, "abuseipdb_reporter")):
+        sys.path.insert(0, _candidate)
+        break
+
+from abuseipdb_reporter.cli import main_upgrade  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main_upgrade())

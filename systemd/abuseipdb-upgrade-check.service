@@ -1,0 +1,15 @@
+[Unit]
+Description=Check for Fail2Ban_AbuseIPDB updates (does not install them)
+Documentation=https://github.com/paulmann/Fail2Ban_AbuseIPDB
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/abuseipdb-upgrade --check --quiet
+Nice=10
+IOSchedulingClass=idle
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=true

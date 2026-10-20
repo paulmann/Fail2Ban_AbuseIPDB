@@ -1,0 +1,5 @@
+# Alternative to the systemd timer: weekly update check from cron (check only).
+# Installed by install.sh --with-update-check when cron is used.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+30 4 * * 1 root /usr/local/sbin/abuseipdb-upgrade --check --quiet >> /var/log/abuseipdb-reporter.log 2>&1

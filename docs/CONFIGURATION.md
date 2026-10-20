@@ -10,7 +10,8 @@ is the `ABUSEIPDB_REPORTER_CONFIG` environment variable.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `api_key` | *(empty)* | AbuseIPDB API key. Required for sending |
+| `api_key_file` | `/etc/abuseipdb/.abuseipdb.key` | file with the API key (mode 600). Preferred location |
+| `api_key` | *(empty)* | **deprecated** legacy key in the config; migrated by `--migrate-key` |
 | `api_url` | `https://api.abuseipdb.com/api/v2/report` | report endpoint |
 | `check_url` | `https://api.abuseipdb.com/api/v2/check` | endpoint used by `--check-key` |
 | `enabled` | `yes` | `no` pauses sending; bans keep being queued |
@@ -21,6 +22,22 @@ is the `ABUSEIPDB_REPORTER_CONFIG` environment variable.
 | `comment_max_bytes` | `1000` | comment is truncated to this size (API hard limit 1024) |
 | `evidence_max_lines` | `4` | how many evidence lines/URLs to include |
 | `skip_jails` | `recidive` | comma separated jails that are never reported |
+
+## API key resolution
+
+The key is read in this order:
+
+1. `--api-key` command line option (one-off, never saved);
+2. `ABUSEIPDB_API_KEY` or `ABUSEIPDB_KEY` environment variable;
+3. the key file (`api_key_file`, `ABUSEIPDB_KEY_FILE` env, default
+   `/etc/abuseipdb/.abuseipdb.key`);
+4. legacy `api_key` in this config file (deprecated);
+5. interactive prompt - only when a human runs the command on a terminal
+   (systemd/cron runs never prompt; they log an error and exit).
+
+`abuseipdb-report --setup` asks for the key and saves it; `--migrate-key` moves
+a legacy `api_key` into the key file and blanks the config line;
+`--key-status` shows the source and a masked key.
 
 ## `[database]`
 
@@ -68,6 +85,12 @@ or replace it with your own text/link:
 [report]
 attribution_text = Reported by ACME edge scanner
 ```
+
+## `[update]`
+
+| Option | Default | Meaning |
+|---|---|---|
+| `manifest_url` | `https://raw.githubusercontent.com/paulmann/Fail2Ban_AbuseIPDB/main/updater.json` | manifest used by `abuseipdb-upgrade`; override for mirrors or testing |
 
 ## `[ignore]`
 

@@ -74,8 +74,22 @@ jobs:
           sudo test -f /tmp/stage/etc/logrotate.d/abuseipdb-reporter
           sudo grep -q "sshd" /tmp/stage/etc/fail2ban/jail.d/50-abuseipdb-reporter.local
           sudo grep -q "nginx-attack-scan" /tmp/stage/etc/fail2ban/jail.d/50-abuseipdb-reporter.local
+          # API key must live in its own file, not in the config
+          sudo test -f /tmp/stage/etc/abuseipdb/.abuseipdb.key
+          sudo test "$(sudo stat -c %a /tmp/stage/etc/abuseipdb/.abuseipdb.key)" = "600"
+          sudo grep -q "api_key_file = /etc/abuseipdb/.abuseipdb.key" /tmp/stage/etc/abuseipdb/reporter.conf
+          sudo grep -q "^api_key =$" /tmp/stage/etc/abuseipdb/reporter.conf
+          # upgrade without --api-key and without --jails: key and jails must survive
+          KEY_SUM="$(sudo sha256sum /tmp/stage/etc/abuseipdb/.abuseipdb.key | cut -d' ' -f1)"
+          sudo bash install.sh --root /tmp/stage --cron --skip-api-check --no-restart
+          test "$(sudo sha256sum /tmp/stage/etc/abuseipdb/.abuseipdb.key | cut -d' ' -f1)" = "$KEY_SUM"
+          sudo grep -q "sshd" /tmp/stage/etc/fail2ban/jail.d/50-abuseipdb-reporter.local
+          sudo grep -q "nginx-attack-scan" /tmp/stage/etc/fail2ban/jail.d/50-abuseipdb-reporter.local
       - name: Staged uninstall
         run: |
           sudo bash install.sh --root /tmp/stage --uninstall
           sudo test ! -f /tmp/stage/usr/local/sbin/abuseipdb-report
           sudo test ! -f /tmp/stage/etc/fail2ban/jail.d/50-abuseipdb-reporter.local
+          # the key file and config survive a normal uninstall
+          sudo test -f /tmp/stage/etc/abuseipdb/.abuseipdb.key
+          sudo test -f /tmp/stage/etc/abuseipdb/reporter.conf
