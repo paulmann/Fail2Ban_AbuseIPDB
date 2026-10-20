@@ -489,6 +489,18 @@ evidence and is always the last line, even when the comment is truncated. Set
 * [Self-update](docs/UPDATE.md)
 * [Troubleshooting](docs/TROUBLESHOOTING.md)
 * [Changelog](CHANGELOG.md)
+
+### 📚 Wiki (the long-form documentation)
+
+The [GitHub Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki) is the operator's manual:
+
+| Start | Fail2Ban deep dive | For AI agents |
+|---|---|---|
+| [Why This Exists](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki/01-Why-This-Exists) | [Fundamentals](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki/08-Fail2Ban-Fundamentals) | [Installation prompts](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki/12-Agent-Prompts-Installation) |
+| [Getting Started](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki/02-Getting-Started) | [Web protection](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki/09-Fail2Ban-Web-Protection) | [Fail2Ban setup prompts](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki/13-Agent-Prompts-Fail2Ban-Setup) |
+| [Architecture](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki/03-Architecture) | [SSH, mail, FTP](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki/10-Fail2Ban-SSH-Mail-FTP) | [Operations & audit prompts](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki/14-Agent-Prompts-Operations-and-Audit) |
+| [Configuration](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki/04-Configuration-Reference) | [Verification & rollback](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki/11-Fail2Ban-Verification-and-Rollback) | [Self-update](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki/06-Self-Update) |
+| [API keys](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki/05-API-Key-Management) | [Troubleshooting](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki/15-Troubleshooting) | [FAQ](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki/16-FAQ) |
 * [Contributing](CONTRIBUTING.md)
 * [Security policy](SECURITY.md)
 
