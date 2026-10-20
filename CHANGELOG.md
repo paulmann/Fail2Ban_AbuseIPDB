@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   * uninstall with restore of previous files, optional `--purge`.
 * Documentation: English README, installation, configuration, architecture and
   troubleshooting guides.
-* Tests: 52 unit tests (stdlib `unittest`, no network/root) and an end-to-end
+* Tests: 53 unit tests (stdlib `unittest`, no network/root) and an end-to-end
   integration test against a bundled mock AbuseIPDB API.
 * CI: unit tests on Python 3.9-3.13, shellcheck, staged install/uninstall.
 

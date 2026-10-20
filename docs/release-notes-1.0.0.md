@@ -28,7 +28,7 @@ scheduled worker.
 - **Production installer** - backups, `fail2ban-client -t` gate, staging mode,
   idempotent upgrade, state-driven uninstall and `--purge`.
 - **Zero dependencies** - Python standard library only.
-- **Tested** - 52 unit tests, an end-to-end integration test against a mock API,
+- **Tested** - 53 unit tests, an end-to-end integration test against a mock API,
   shellcheck and a staged install/uninstall job in CI.
 
 ### Requirements

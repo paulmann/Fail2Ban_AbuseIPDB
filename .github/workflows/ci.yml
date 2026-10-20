@@ -63,18 +63,19 @@ jobs:
           KEY="$(printf 'a%.0s' $(seq 1 80))"
           sudo bash install.sh --root /tmp/stage --api-key "$KEY" \
             --jails "sshd nginx-attack-scan" --cron --skip-api-check --no-restart
-          test -f /tmp/stage/usr/local/sbin/abuseipdb-report
-          test -f /tmp/stage/usr/local/sbin/abuseipdb-enqueue
-          test -f /tmp/stage/usr/local/lib/abuseipdb_reporter/cli.py
-          test -f /tmp/stage/etc/abuseipdb/reporter.conf
-          test -f /tmp/stage/etc/fail2ban/action.d/abuseipdb-async.conf
-          test -f /tmp/stage/etc/fail2ban/jail.d/50-abuseipdb-reporter.local
-          test -f /tmp/stage/etc/cron.d/abuseipdb-reporter
-          test -f /tmp/stage/etc/logrotate.d/abuseipdb-reporter
-          grep -q "sshd" /tmp/stage/etc/fail2ban/jail.d/50-abuseipdb-reporter.local
-          grep -q "nginx-attack-scan" /tmp/stage/etc/fail2ban/jail.d/50-abuseipdb-reporter.local
+          # /etc/abuseipdb is mode 700 root, so verify as root
+          sudo test -f /tmp/stage/usr/local/sbin/abuseipdb-report
+          sudo test -f /tmp/stage/usr/local/sbin/abuseipdb-enqueue
+          sudo test -f /tmp/stage/usr/local/lib/abuseipdb_reporter/cli.py
+          sudo test -f /tmp/stage/etc/abuseipdb/reporter.conf
+          sudo test -f /tmp/stage/etc/fail2ban/action.d/abuseipdb-async.conf
+          sudo test -f /tmp/stage/etc/fail2ban/jail.d/50-abuseipdb-reporter.local
+          sudo test -f /tmp/stage/etc/cron.d/abuseipdb-reporter
+          sudo test -f /tmp/stage/etc/logrotate.d/abuseipdb-reporter
+          sudo grep -q "sshd" /tmp/stage/etc/fail2ban/jail.d/50-abuseipdb-reporter.local
+          sudo grep -q "nginx-attack-scan" /tmp/stage/etc/fail2ban/jail.d/50-abuseipdb-reporter.local
       - name: Staged uninstall
         run: |
           sudo bash install.sh --root /tmp/stage --uninstall
-          test ! -f /tmp/stage/usr/local/sbin/abuseipdb-report
-          test ! -f /tmp/stage/etc/fail2ban/jail.d/50-abuseipdb-reporter.local
+          sudo test ! -f /tmp/stage/usr/local/sbin/abuseipdb-report
+          sudo test ! -f /tmp/stage/etc/fail2ban/jail.d/50-abuseipdb-reporter.local

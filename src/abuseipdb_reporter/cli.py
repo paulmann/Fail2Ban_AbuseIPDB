@@ -5,34 +5,56 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from typing import List, Optional
 
 from . import api, db, enqueue, log, reporter
 from .config import Config, load_config
 
 __version__ = "1.0.0"
-LOCK_PATH = "/run/fail2ban-abuseipdb-reporter.lock"
+
+#: Lock locations tried in order; the first writable one wins.  ``/run`` is the
+#: normal place for a system service, the fallbacks keep the tool usable by an
+#: unprivileged user (tests, CI) without silently skipping every run.
+LOCK_CANDIDATES = (
+    "/run/fail2ban-abuseipdb-reporter.lock",
+    "/var/lock/fail2ban-abuseipdb-reporter.lock",
+    os.path.join(tempfile.gettempdir(), "fail2ban-abuseipdb-reporter.lock"),
+)
 
 
-def acquire_lock(path: str = LOCK_PATH):
+def acquire_lock(paths=None):
     """Try to take an exclusive lock.
 
-    Returns a file object when the lock is held, ``None`` when locking is not
-    supported (e.g. Windows development machines) and ``False`` when another
-    reporter instance is already running.
+    ``paths`` may be a single path, a list of candidates, or ``None`` for the
+    default list.  Returns a file object when the lock is held, ``None`` when
+    locking is not supported (e.g. Windows) or no candidate is writable, and
+    ``False`` when another reporter instance already holds the lock.
     """
     try:
         import fcntl
     except ImportError:
         return None
-    try:
-        handle = open(path, "w")
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    if paths is None:
+        paths = LOCK_CANDIDATES
+    elif isinstance(paths, str):
+        paths = [paths]
+    for path in paths:
+        if not path:
+            continue
+        try:
+            handle = open(path, "w")
+        except OSError:
+            continue  # not writable: try the next candidate
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            handle.close()
+            return False  # held by another instance
         handle.write(str(os.getpid()))
         handle.flush()
         return handle
-    except OSError:
-        return False
+    return None  # no writable lock path: run without locking
 
 
 def _stats_text(cfg: Config) -> str:

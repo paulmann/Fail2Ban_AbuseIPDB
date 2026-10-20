@@ -75,6 +75,20 @@ class CliTests(TempDirTestCase):
         self.assertEqual(payloads[0]["ip"], "8.8.8.8")
         self.assertIn("comment", payloads[0])
 
+    def test_acquire_lock_is_exclusive(self):
+        try:
+            import fcntl  # noqa: F401
+        except ImportError:
+            self.skipTest("fcntl is not available on this platform")
+        lock_path = os.path.join(self.tmp, "reporter.lock")
+        first = cli.acquire_lock([lock_path])
+        self.assertIsNotNone(first)
+        self.assertFalse(cli.acquire_lock([lock_path]))
+        first.close()
+        second = cli.acquire_lock([lock_path])
+        self.assertIsNotNone(second)
+        second.close()
+
     def test_invalid_ip_does_not_raise(self):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):

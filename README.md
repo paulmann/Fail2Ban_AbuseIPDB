@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](pyproject.toml)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20systemd%20%7C%20cron-lightgrey.svg)](#compatibility)
-[![Tests](https://img.shields.io/badge/tests-52%20passing-brightgreen.svg)](tests)
+[![Tests](https://img.shields.io/badge/tests-53%20passing-brightgreen.svg)](tests)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 > **Asynchronous fail2ban → AbuseIPDB reporting.**
@@ -93,7 +93,7 @@ flowchart LR
 | 🛡️ **No command injection** | Attacker-controlled log text is never passed to a shell. |
 | 🔒 **PII-free** | No attempted usernames, no mail content, no client domains - only the attacker's IP and requests. |
 | 👁️ **Observable** | `--stats`, `--dry-run`, `--check-key`, structured log, logrotate config. |
-| 🧪 **Tested** | 52 unit tests + an end-to-end integration test against a mock API, plus a shellcheck/CI gate. |
+| 🧪 **Tested** | 53 unit tests + an end-to-end integration test against a mock API, plus a shellcheck/CI gate. |
 | ♻️ **Safe installer** | Backups every replaced file, `fail2ban-client -t` before restart, state-driven uninstall, staging mode. |
 
 ---
@@ -327,7 +327,7 @@ See [SECURITY.md](SECURITY.md) for the vulnerability reporting policy.
 ## Testing
 
 ```bash
-# 52 unit tests (Python 3.9+, no network, no root)
+# 53 unit tests (Python 3.9+, no network, no root)
 python -m unittest discover -v -s tests -t .
 
 # end-to-end test: real worker + queue + mock AbuseIPDB API (no external calls)
