@@ -4,7 +4,7 @@
   "released": "2026-10-20",
   "requires_python": ">=3.9",
   "tarball": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/download/v1.1.0/Fail2Ban_AbuseIPDB-1.1.0.tar.gz",
-  "sha256": "PENDING",
+  "sha256": "965b83fc57fc8efda93686538950e519ad656cd69e083f8220faec13744a242b",
   "release_notes": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.1.0",
   "changelog": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/blob/main/CHANGELOG.md",
   "notes": "Self-update support; API key moved to /etc/abuseipdb/.abuseipdb.key and preserved across updates."
