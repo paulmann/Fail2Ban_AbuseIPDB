@@ -1,0 +1,51 @@
+name: Bug report
+description: Report a reproducible problem
+title: "[bug] "
+labels: [ "bug" ]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not paste your AbuseIPDB API key or real collected IP addresses.
+  - type: input
+    id: version
+    attributes:
+      label: Project version
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Distribution, Python and fail2ban versions
+      placeholder: "Debian 12, Python 3.11, fail2ban 1.1.0"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: "abuseipdb-report --stats, fail2ban-client get <jail> actions, log lines (redacted)"
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I have read docs/TROUBLESHOOTING.md
+          required: true
+        - label: I removed secrets (API key) and private data from the report
+          required: true

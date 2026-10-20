@@ -1,0 +1,27 @@
+# Local test/development artefacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Local configuration / secrets - never commit these
+reporter.conf
+*.secret
+.env
+
+# Local queue databases and logs
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.log
+
+# Machine-local code index (RAGRAF) and OS noise
+.ragraf/
+.DS_Store
+Thumbs.db

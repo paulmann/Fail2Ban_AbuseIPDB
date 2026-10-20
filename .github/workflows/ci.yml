@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: [ "3.9", "3.10", "3.11", "3.12", "3.13" ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Byte-compile the package
+        run: python -m compileall -q src
+      - name: Unit tests
+        run: python -m unittest discover -v -s tests -t .
+      - name: CLI smoke test
+        run: |
+          python bin/abuseipdb-report --help
+          python bin/abuseipdb-enqueue --help
+
+  integration:
+    name: integration (mock AbuseIPDB)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: End-to-end test
+        run: bash tests/integration/run_integration.sh
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - run: shellcheck -x install.sh uninstall.sh tests/integration/run_integration.sh
+
+  staging-install:
+    name: staged install / uninstall
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Staged install
+        run: |
+          KEY="$(printf 'a%.0s' $(seq 1 80))"
+          sudo bash install.sh --root /tmp/stage --api-key "$KEY" \
+            --jails "sshd nginx-attack-scan" --cron --skip-api-check --no-restart
+          test -f /tmp/stage/usr/local/sbin/abuseipdb-report
+          test -f /tmp/stage/usr/local/sbin/abuseipdb-enqueue
+          test -f /tmp/stage/usr/local/lib/abuseipdb_reporter/cli.py
+          test -f /tmp/stage/etc/abuseipdb/reporter.conf
+          test -f /tmp/stage/etc/fail2ban/action.d/abuseipdb-async.conf
+          test -f /tmp/stage/etc/fail2ban/jail.d/50-abuseipdb-reporter.local
+          test -f /tmp/stage/etc/cron.d/abuseipdb-reporter
+          test -f /tmp/stage/etc/logrotate.d/abuseipdb-reporter
+          grep -q "sshd" /tmp/stage/etc/fail2ban/jail.d/50-abuseipdb-reporter.local
+          grep -q "nginx-attack-scan" /tmp/stage/etc/fail2ban/jail.d/50-abuseipdb-reporter.local
+      - name: Staged uninstall
+        run: |
+          sudo bash install.sh --root /tmp/stage --uninstall
+          test ! -f /tmp/stage/usr/local/sbin/abuseipdb-report
+          test ! -f /tmp/stage/etc/fail2ban/jail.d/50-abuseipdb-reporter.local

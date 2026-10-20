@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest an improvement
+title: "[feature] "
+labels: [ "enhancement" ]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is missing or inconvenient?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: This does not require network access in the fail2ban ban path
+          required: true
+        - label: This does not introduce third-party dependencies
+          required: true

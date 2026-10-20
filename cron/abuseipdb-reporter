@@ -1,0 +1,8 @@
+# Alternative to the systemd timer: run the reporter from cron every 16 minutes.
+# Install with:  install.sh --cron
+# Note: cron */16 fires at :00,:16,:32,:48 (12-minute gap before the hour);
+# the per-IP throttle in the reporter still guarantees >= 20 minutes between
+# reports for the same address.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+*/16 * * * * root /usr/local/sbin/abuseipdb-report >> /var/log/abuseipdb-reporter.log 2>&1

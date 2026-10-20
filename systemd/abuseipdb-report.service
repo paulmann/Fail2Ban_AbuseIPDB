@@ -1,0 +1,16 @@
+[Unit]
+Description=fail2ban -> AbuseIPDB asynchronous reporter
+Documentation=file:/etc/abuseipdb/reporter.conf
+After=network-online.target fail2ban.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/abuseipdb-report
+Nice=10
+IOSchedulingClass=idle
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=true
+ReadWritePaths=/var/lib/abuseipdb /var/log

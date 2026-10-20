@@ -1,0 +1,84 @@
+# ============================================================================
+#  fail2ban-abuseipdb-reporter configuration
+#  Documentation: docs/CONFIGURATION.md
+# ============================================================================
+
+[abuseipdb]
+# Your AbuseIPDB API key (https://www.abuseipdb.com/account/api).
+# Keep this file chmod 600 root:root - the key is a secret.
+api_key = YOUR_ABUSEIPDB_API_KEY
+
+# API endpoints (change only for testing/proxying).
+api_url = https://api.abuseipdb.com/api/v2/report
+check_url = https://api.abuseipdb.com/api/v2/check
+
+# Set to "no" to pause reporting without removing the action from fail2ban:
+# bans keep being queued locally.
+enabled = yes
+
+# HTTP timeout for one API call, seconds.
+timeout = 25
+
+# AbuseIPDB allows one report per IP every 15 minutes. Keep a safety margin.
+min_interval_ip = 1200
+
+# Rate limiting for the worker.
+max_reports_per_run = 25
+max_reports_per_day = 900
+
+# Comment is truncated to this many bytes (AbuseIPDB hard limit: 1024).
+comment_max_bytes = 1000
+evidence_max_lines = 4
+
+# Jails that must NOT be reported (usually aggregate jails that only repeat
+# bans already reported by more specific jails).
+skip_jails = recidive
+
+[database]
+# Local queue and report journal (SQLite, WAL).
+path = /var/lib/abuseipdb/abuseipdb.sqlite3
+
+# Fail2ban's own database: the reporter reads the matched log lines from
+# table "bips" to build the evidence section of the comment.
+fail2ban_db = /var/lib/fail2ban/fail2ban.sqlite3
+
+# How long to keep finished events and report attempts, days.
+retention_days = 30
+
+# A transient API error is retried on subsequent runs; after this many
+# attempts the event is marked as "gave up".
+max_attempts = 10
+
+[report]
+# Shown in the report comment. Both options are optional.
+server_ip = 203.0.113.10
+hostname = fail2ban-host
+
+[ignore]
+# Never report these addresses: our own and trusted hosts, private, loopback,
+# reserved, documentation networks and CDN ranges that proxy other people's
+# traffic (Cloudflare ranges are listed as an example - extend for your setup).
+ranges = 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16,
+         172.16.0.0/12, 192.168.0.0/16, 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24,
+         224.0.0.0/4, 240.0.0.0/4,
+         ::1/128, fc00::/7, fe80::/10, 2001:db8::/32,
+         173.245.48.0/20, 103.21.244.0/22, 103.22.200.0/22, 103.31.4.0/22, 141.101.64.0/18,
+         108.162.192.0/18, 190.93.240.0/20, 188.114.96.0/20, 197.234.240.0/22, 198.41.128.0/17,
+         162.158.0.0/15, 104.16.0.0/13, 104.24.0.0/14, 172.64.0.0/13, 131.0.72.0/22,
+         2400:cb00::/32, 2606:4700::/32, 2803:f800::/32, 2405:b500::/32, 2405:8100::/32,
+         2a06:98c0::/29, 2c0f:f248::/32
+
+[category_map]
+# AbuseIPDB category IDs per jail (https://www.abuseipdb.com/categories).
+#   5  FTP Brute-Force      18 Brute-Force        21 Web App Attack
+#  11  Email Spam           19 Bad Web Bot        22 SSH
+#  15  Hacking              16 SQL Injection
+# SQL-injection attempts are detected automatically and category 16 is added.
+sshd = 18,22
+proftpd = 18,5
+exim-auth-fail = 18
+exim-isp = 18,11
+nginx-attack-scan = 21,19
+nginx-wp-login = 21,18
+nginx-php-probe = 21,15
+nginx-forbidden = 21

@@ -1,0 +1,11 @@
+# Rotate the reporter log (AbuseIPDB worker output).
+/var/log/abuseipdb-reporter.log {
+    su root adm
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 root adm
+}

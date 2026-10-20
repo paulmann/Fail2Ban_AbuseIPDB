@@ -1,0 +1,32 @@
+# Reference template: attach the asynchronous AbuseIPDB action to selected jails.
+#
+# install.sh generates the real file (/etc/fail2ban/jail.d/50-abuseipdb-reporter.local)
+# for the jails you pass with --jails (default: sshd), so you normally do not
+# need to edit this file.  It is kept here as documentation and for manual
+# installations.
+#
+# IMPORTANT: keep your own jail settings (maxretry/findtime/bantime/logpath) in
+# your existing jail configuration; this file only adds the extra action.
+
+[DEFAULT]
+action_abuseipdb_async = abuseipdb-async
+
+[sshd]
+action = %(action_)s
+         %(action_abuseipdb_async)s
+
+[nginx-attack-scan]
+action = %(action_)s
+         %(action_abuseipdb_async)s
+
+[nginx-wp-login]
+action = %(action_)s
+         %(action_abuseipdb_async)s
+
+[nginx-php-probe]
+action = %(action_)s
+         %(action_abuseipdb_async)s
+
+[proftpd]
+action = %(action_)s
+         %(action_abuseipdb_async)s

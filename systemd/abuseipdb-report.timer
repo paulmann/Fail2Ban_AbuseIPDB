@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the fail2ban -> AbuseIPDB reporter every 16 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=16min
+AccuracySec=30s
+RandomizedDelaySec=20s
+Persistent=true
+Unit=abuseipdb-report.service
+
+[Install]
+WantedBy=timers.target
