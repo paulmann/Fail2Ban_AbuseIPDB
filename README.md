@@ -1,7 +1,7 @@
 # Fail2Ban_AbuseIPDB
 
 [![CI](https://github.com/paulmann/Fail2Ban_AbuseIPDB/actions/workflows/ci.yml/badge.svg)](https://github.com/paulmann/Fail2Ban_AbuseIPDB/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)](CHANGELOG.md)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](pyproject.toml)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20systemd%20%7C%20cron-lightgrey.svg)](#compatibility)

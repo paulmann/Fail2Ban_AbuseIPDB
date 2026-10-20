@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fail2ban-abuseipdb-reporter"
-version = "1.1.0"
+version = "1.1.1"
 description = "Asynchronous fail2ban to AbuseIPDB reporter: queues bans in SQLite and submits rich, evidence-backed abuse reports on a schedule."
 readme = "README.md"
 requires-python = ">=3.9"

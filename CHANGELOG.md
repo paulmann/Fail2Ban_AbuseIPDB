@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] - 2026-10-20
+
+### Fixed
+
+* **Installer config placement**: when upgrading a configuration that had no
+  `api_key_file` line, the installer appended it at the end of the file (inside
+  whatever section happened to be last, e.g. `[category_map]`) instead of
+  `[abuseipdb]`. It is now inserted at the end of the `[abuseipdb]` section, and
+  an existing line is replaced in place. The reporter itself always used the
+  documented default, but custom `--key-file` paths were not read from the
+  config in that edge case.
+
 ## [1.1.0] - 2026-10-20
 
 ### Added

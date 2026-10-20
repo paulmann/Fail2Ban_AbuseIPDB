@@ -9,7 +9,7 @@
 set -euo pipefail
 
 PROG="$(basename "$0")"
-VERSION="1.1.0"
+VERSION="1.1.1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 PREFIX="/usr/local"
@@ -385,13 +385,21 @@ install_config() {
     fi
     tmp="$(mktemp)"
     awk -v keyfile="$KEY_FILE" '
-      BEGIN { in_abuseipdb = 0; key_line = 0 }
-      /^\[abuseipdb\][[:space:]]*$/ { in_abuseipdb = 1 }
-      /^\[/ && $0 !~ /^\[abuseipdb\]/ { in_abuseipdb = 0 }
-      /^[[:space:]]*api_key[[:space:]]*=/ { print "api_key ="; next }
-      /^[[:space:]]*api_key_file[[:space:]]*=/ { print "api_key_file = " keyfile; key_line = 1; next }
+      BEGIN { in_abuseipdb = 0; found = 0 }
+      /^\[/ {
+        if (in_abuseipdb && !found) { print "api_key_file = " keyfile; found = 1 }
+        in_abuseipdb = ($0 ~ /^\[abuseipdb\][[:space:]]*$/)
+        print
+        next
+      }
+      in_abuseipdb && /^[[:space:]]*api_key[[:space:]]*=/ { print "api_key ="; next }
+      in_abuseipdb && /^[[:space:]]*api_key_file[[:space:]]*=/ {
+        print "api_key_file = " keyfile; found = 1; next
+      }
+      # drop a stray api_key_file line from another section (old installer bug)
+      !in_abuseipdb && /^[[:space:]]*api_key_file[[:space:]]*=/ { next }
       { print }
-      END { if (!key_line) print "api_key_file = " keyfile }
+      END { if (in_abuseipdb && !found) print "api_key_file = " keyfile }
     ' "$target" > "$tmp"
     install -m 600 "$tmp" "$target"
     rm -f "$tmp"

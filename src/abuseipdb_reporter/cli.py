@@ -11,7 +11,7 @@ from typing import List, Optional
 from . import api, db, enqueue, keys, log, reporter
 from .config import Config, load_config
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 #: Lock locations tried in order; the first writable one wins.  ``/run`` is the
 #: normal place for a system service, the fallbacks keep the tool usable by an
