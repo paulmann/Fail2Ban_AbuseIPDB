@@ -16,6 +16,15 @@ jobs:
   release:
     name: build and publish
     runs-on: ubuntu-latest
+    # Must match "Environment name" in the PyPI trusted publisher exactly; an
+    # empty field there means no environment here at all, and a mismatch ends in
+    # 403 invalid-publisher on upload.
+    environment: pypi
+    # Job-level permissions replace the file-level ones, so both are repeated:
+    # contents = create the release, id-token = OIDC for PyPI.
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -85,6 +94,15 @@ jobs:
         run: |
           python -m pip install --upgrade build
           python -m build
+
+      # Trusted publishing: no password, no stored token. GitHub mints a
+      # short-lived OIDC token and PyPI exchanges it for an upload token scoped
+      # to this repository, this workflow and the pypi environment.
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          print-hash: true
 
       - name: Create the GitHub release
         shell: bash
