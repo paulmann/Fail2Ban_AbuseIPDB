@@ -14,7 +14,7 @@ import sys
 import tempfile
 import time
 
-REPO = os.path.dirname(os.path.abspath(__file__ + "/..")) if False else r"C:\GIT\Fail2Ban_AbuseIPDB"
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PY = sys.executable
 
 
@@ -37,6 +37,105 @@ def wait_for(port: int, timeout: float = 10.0) -> None:
 
 def run(args, **kwargs):
     return subprocess.run(args, cwd=REPO, capture_output=True, text=True, **kwargs)
+
+
+def coordination_round(work, leader_config, requests_path):
+    """Leader/follower round trip on the loopback interface, no external network."""
+    coord_port = free_port()
+    secret_path = os.path.join(work, "coord.secret")
+    with open(secret_path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("e2e-" + "s" * 40 + "\n")
+
+    with open(leader_config, "a", encoding="utf-8", newline="\n") as handle:
+        handle.write(
+            "\n[coordination]\nmode = leader\nnode_id = leader-1\n"
+            "shared_secret_file = %s\ncoord_bind = 127.0.0.1\ncoord_port = %d\n"
+            % (secret_path.replace("\\", "/"), coord_port)
+        )
+
+    coord = subprocess.Popen(
+        [PY, "bin/abuseipdb-coord", "--config", leader_config],
+        cwd=REPO,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        wait_for(coord_port)
+        check = run([PY, "bin/abuseipdb-coord", "--check", "--config", leader_config])
+        assert check.returncode == 0, check.stdout + check.stderr
+        assert "secret: present" in check.stdout, check.stdout
+
+        follower_dir = os.path.join(work, "follower")
+        os.makedirs(follower_dir, exist_ok=True)
+        follower_config = os.path.join(follower_dir, "reporter.conf")
+        with open(follower_config, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(
+                "[abuseipdb]\ntimeout = 5\n"
+                "[database]\npath = %s\nfail2ban_db = %s\n"
+                "[logging]\npath = %s\n"
+                "[ignore]\nranges = 127.0.0.0/8\n"
+                "[coordination]\nmode = follower\nnode_id = web-1\n"
+                "leader_url = http://127.0.0.1:%d\nshared_secret_file = %s\n"
+                "push_batch_size = 50\n"
+                % (
+                    os.path.join(follower_dir, "queue.sqlite3").replace("\\", "/"),
+                    os.path.join(work, "fail2ban.sqlite3").replace("\\", "/"),
+                    os.path.join(follower_dir, "reporter.log").replace("\\", "/"),
+                    coord_port,
+                    secret_path.replace("\\", "/"),
+                )
+            )
+
+        for ip in ("198.51.100.20", "198.51.100.21"):
+            out = run(
+                [PY, "bin/abuseipdb-enqueue", "--config", follower_config, "--ip", ip,
+                 "--jail", "sshd", "--bantime", "3600", "--failures", "5"]
+            )
+            assert out.returncode == 0, out.stderr
+
+        dry = run([PY, "bin/abuseipdb-report", "--config", follower_config, "--dry-run"])
+        assert dry.returncode == 0, dry.stderr
+        previews = [json.loads(line) for line in dry.stdout.splitlines() if line.startswith("{")]
+        assert len(previews) == 2, previews
+
+        pushed = run([PY, "bin/abuseipdb-report", "--config", follower_config])
+        assert pushed.returncode == 0, pushed.stderr
+        assert "pushed=2" in pushed.stdout, pushed.stdout
+
+        follower_db = sqlite3.connect(os.path.join(follower_dir, "queue.sqlite3"))
+        states = follower_db.execute("SELECT pushed, reported FROM events").fetchall()
+        follower_db.close()
+        assert states == [(1, 0), (1, 0)], states
+
+        leader_db = sqlite3.connect(os.path.join(work, "queue.sqlite3"))
+        queued = [
+            row[0]
+            for row in leader_db.execute("SELECT ip FROM events WHERE reported=0 ORDER BY ip")
+        ]
+        leader_db.close()
+        assert queued == ["198.51.100.20", "198.51.100.21"], queued
+
+        status_out = run([PY, "bin/abuseipdb-report", "--config", follower_config, "--coord-status"])
+        assert status_out.returncode == 0, status_out.stderr
+        assert '"role": "leader"' in status_out.stdout, status_out.stdout
+
+        leader_run = run([PY, "bin/abuseipdb-report", "--config", leader_config])
+        assert leader_run.returncode == 0, leader_run.stderr
+        assert "sent=2" in leader_run.stdout, leader_run.stdout
+        with open(requests_path, "r", encoding="utf-8") as handle:
+            total = [json.loads(line) for line in handle if line.strip()]
+        assert len(total) == 3, "expected 3 API calls in total, got %d" % len(total)
+        print(
+            "coordination OK: follower pushed 2 events, leader reported them "
+            "(3 API calls in total)"
+        )
+    finally:
+        coord.terminate()
+        try:
+            coord.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            coord.kill()
 
 
 def main() -> int:
@@ -149,6 +248,8 @@ def main() -> int:
 
         print("queue state, status.json, metrics and --status OK (version %s)"
               % status["version"])
+
+        coordination_round(work, config, requests_path)
     finally:
         mock.terminate()
         try:

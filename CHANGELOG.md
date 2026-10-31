@@ -4,6 +4,41 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-10-31
+
+### Added
+
+* **Leader/follower coordination** for several protected hosts sharing one
+  AbuseIPDB account (limits are per account): `[coordination] mode = leader`
+  keeps the API key and accepts pushed events, `mode = follower` pushes its queue
+  and never calls the API. The default `mode = none` is byte-for-byte the old
+  behaviour.
+  * new `abuseipdb-coord` entry point (installed by `install.sh`, unit
+    `abuseipdb-coord.service` installed but **never enabled**);
+  * two routes: `POST /v1/push` (batch of events, `X-Coord-Secret`) and
+    `GET /v1/status`; constant-time secret comparison, 1 MiB body cap, 5000
+    events per request cap;
+  * the leader applies its own filters (valid address, `[ignore] ranges`,
+    `skip_jails`) before queueing, and reports through the normal worker, so the
+    account-wide budget and the per-IP interval stay exact;
+  * `abuseipdb-report --coord-status` shows the role, whether the secret is
+    present, and the leader's status from a follower;
+  * `--dry-run` on a follower prints the events that would be pushed.
+* `events.pushed` column with an in-place migration in `db.connect()` (an old
+  queue is upgraded, never rewritten); pushed events are excluded from every
+  local reporting query and removed by `retention_days`.
+* `docs/COORDINATION.md`: roles, configuration, secret generation, failover,
+  security rules and a failure-mode table.
+
+### Changed
+
+* `--stats` prints a `pushed to leader` counter.
+* Coordination HTTP failures keep events queued: a leader outage delays reports
+  and never loses them. A lost acknowledgement is absorbed by the leader's
+  5-minute deduplication.
+* Tests: **151** (was 124), including the endpoint, the migration, the follower
+  path and authentication.
+
 ## [1.2.1] - 2026-10-31
 
 ### Fixed
@@ -143,3 +178,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 [1.1.1]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.1.1
 [1.2.0]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.2.0
 [1.2.1]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.2.1
+[1.3.0]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.3.0

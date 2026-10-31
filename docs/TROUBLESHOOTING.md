@@ -130,6 +130,27 @@ malformed value). The event is marked `2` (invalid) and is never retried. Check
   server: 25 reports per tick and 900 per day are the configured ceilings. The
   queue keeps every event and drains over time; nothing is lost.
 
+## Coordination problems (leader/follower)
+
+```bash
+abuseipdb-report --coord-status     # role, node_id, secret present/missing, leader status
+abuseipdb-coord --check            # leader side: config + secret
+curl -s -H "X-Coord-Secret: $(cat /etc/abuseipdb/.coord.secret)" \
+     http://10.0.0.5:8765/v1/status
+```
+
+| Symptom | Cause | Action |
+|---|---|---|
+| `follower (HTTP 403 ...)` | the secret differs between the nodes | `sha256sum /etc/abuseipdb/.coord.secret` on both ends |
+| `follower (missing shared secret ...)` | file absent, empty or unreadable | create it (mode 600) and retry |
+| `follower (URLError ...)` | leader down, wrong port, firewall | the `curl` above; check `coord_bind`/`coord_port` |
+| `waiting for push` grows, leader reports `pending: 0` | follower points at the wrong leader | `--coord-status` on the follower |
+| Leader log: `coord: warning: mode is 'none'` | endpoint started on a standalone node | set `[coordination] mode = leader` |
+| Pushed events rejected | address inside `[ignore] ranges` or a jail in `skip_jails` on the leader | the response counts them; align the two configurations |
+| Events accepted, never reported | leader has no API key / budget exhausted | `abuseipdb-report --status` on the leader |
+
+Full procedure: [COORDINATION.md](COORDINATION.md).
+
 ## fail2ban configuration test fails after installation
 
 The installer runs `fail2ban-client -t` and aborts **before** restarting

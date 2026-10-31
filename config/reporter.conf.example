@@ -84,7 +84,6 @@ manifest_url = https://raw.githubusercontent.com/paulmann/Fail2Ban_AbuseIPDB/mai
 [logging]
 # One line per event; the source of truth on hosts without a persistent journal.
 path = /var/log/abuseipdb-reporter.log
-
 # Machine-readable status of the last run, rewritten atomically after every run.
 # `abuseipdb-report --status` prints it.  An empty value disables the file.
 status_path = /var/lib/abuseipdb/status.json
@@ -92,6 +91,32 @@ status_path = /var/lib/abuseipdb/status.json
 # Optional Prometheus text-exposition file for the node_exporter textfile
 # collector.  Empty means "do not write metrics".
 prometheus_textfile =
+
+[coordination]
+# One AbuseIPDB account, several protected servers? Then exactly one node reports
+# and the others hand their events over. See docs/COORDINATION.md.
+#   none     - standalone (default): this node reports for itself
+#   leader   - reports and accepts events pushed by followers (`abuseipdb-coord`)
+#   follower - never calls the API: pushes events to the leader, needs no API key
+mode = none
+
+# Human name of this node, appears in the leader's log.
+node_id = server1
+
+# follower only: base URL of the leader endpoint (http or https).
+leader_url =
+
+# Shared secret, mode 600, identical on every node
+# (openssl rand -hex 32 > /etc/abuseipdb/.coord.secret && chmod 600 ...).
+shared_secret_file = /etc/abuseipdb/.coord.secret
+
+# leader only: where the endpoint listens. Keep it on a private interface (or
+# behind a reverse proxy) - the protocol is plain HTTP with a shared secret.
+coord_bind = 127.0.0.1
+coord_port = 8765
+
+# Events per push (1-500).
+push_batch_size = 50
 
 [ignore]
 # Never report these addresses: our own and trusted hosts, private, loopback,

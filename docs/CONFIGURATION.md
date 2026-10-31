@@ -64,6 +64,26 @@ a legacy `api_key` into the key file and blanks the config line;
 | `retention_days` | `30` | finished events and report attempts are deleted after this period |
 | `max_attempts` | `10` | transient API errors are retried; after this many attempts the event is marked "gave up" |
 
+## `[coordination]`
+
+One AbuseIPDB account, several protected servers? Then exactly one node reports
+and the others hand their events over. Full guide with diagrams, failover and
+security rules: [COORDINATION.md](COORDINATION.md).
+
+| Option | Default | Meaning |
+|---|---|---|
+| `mode` | `none` | `none` (standalone), `leader` (reports and accepts pushed events) or `follower` (pushes, never reports, needs no API key) |
+| `node_id` | *(empty)* | name of this node in logs and in the leader's status |
+| `leader_url` | *(empty)* | follower only: base URL of the leader, `http://` or `https://` |
+| `shared_secret_file` | `/etc/abuseipdb/.coord.secret` | file holding the shared secret (mode 600, identical everywhere) |
+| `coord_bind` | `127.0.0.1` | leader only: address the endpoint binds to |
+| `coord_port` | `8765` | leader only: port of the endpoint |
+| `push_batch_size` | `50` | events per push (1-500) |
+
+An unknown `mode` value is treated as `none`, so a typo can never turn a node
+into a follower of nobody. The coordination HTTP timeout reuses
+`[abuseipdb] timeout`.
+
 ## `[report]`
 
 | Option | Default | Meaning |

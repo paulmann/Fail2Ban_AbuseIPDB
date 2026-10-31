@@ -1,0 +1,218 @@
+"""The leader-side endpoint that accepts events pushed by follower nodes.
+
+It is deliberately tiny: two routes, one shared secret, the standard library.
+The endpoint never reports anything itself - it only queues the events into the
+leader's own SQLite queue, where the normal worker picks them up and applies the
+account-wide rate limits.
+
+Run it next to the worker:
+
+    abuseipdb-coord --check          # validate secret and settings, then exit
+    abuseipdb-coord                  # serve on coord_bind:coord_port
+
+The endpoint is meant for a trusted network: see ``docs/COORDINATION.md`` for the
+firewall, TLS and failover rules.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Dict, List, Optional
+
+from . import __version__, coordination, db, log
+from .config import Config, load_config
+
+#: Refuse requests larger than this (a push batch is a few kilobytes).
+MAX_BODY_BYTES = 1024 * 1024
+#: Route names, kept short because they are typed into firewalls and proxies.
+PUSH_PATH = "/v1/push"
+STATUS_PATH = "/v1/status"
+
+
+class CoordHandler(BaseHTTPRequestHandler):
+    """Authenticated request handler; the server instance carries cfg and secret."""
+
+    cfg: Config  # set on the bound subclass
+    secret: str = ""
+    server_version = "abuseipdb-coord/" + __version__
+    sys_version = ""
+
+    # -- helpers ---------------------------------------------------------
+    def _path(self) -> str:
+        return self.path.split("?", 1)[0]
+
+    def _authorised(self) -> bool:
+        return coordination._secret_matches(self.secret, self.headers.get("X-Coord-Secret"))
+
+    def _send(self, code: int, payload: Dict) -> None:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _body_length(self) -> Optional[int]:
+        raw = self.headers.get("Content-Length")
+        if raw is None:
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            return None
+
+    # -- routes ----------------------------------------------------------
+    def do_POST(self) -> None:  # noqa: N802 - stdlib naming
+        if self._path() != PUSH_PATH:
+            self._send(404, {"error": "not found"})
+            return
+        if not self._authorised():
+            self._send(403, {"error": "forbidden"})
+            return
+        length = self._body_length()
+        if length is None or length <= 0:
+            self._send(400, {"error": "empty body"})
+            return
+        if length > MAX_BODY_BYTES:
+            self._send(413, {"error": "body too large"})
+            return
+        raw = self.rfile.read(length)
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            self._send(400, {"error": "bad json"})
+            return
+        if not isinstance(payload, dict) or not isinstance(payload.get("events"), list):
+            self._send(400, {"error": "events must be a list"})
+            return
+        result = coordination.accept_events(
+            self.cfg, payload["events"], str(payload.get("node_id") or "")
+        )
+        self._send(200, result)
+
+    def do_GET(self) -> None:  # noqa: N802 - stdlib naming
+        if self._path() != STATUS_PATH:
+            self._send(404, {"error": "not found"})
+            return
+        if not self._authorised():
+            self._send(403, {"error": "forbidden"})
+            return
+        self._send(200, leader_status(self.cfg))
+
+    def log_message(self, fmt: str, *args) -> None:  # noqa: A003 - stdlib hook
+        """Silence the default per-request stderr log; the project log decides."""
+        return
+
+
+def leader_status(cfg: Config) -> Dict[str, object]:
+    """Small status document a follower can query with the same secret."""
+    conn = db.connect(cfg.db_path)
+    try:
+        return {
+            "ok": True,
+            "role": "leader",
+            "mode": coordination.mode_of(cfg),
+            "node_id": cfg.node_id,
+            "version": __version__,
+            "pending": db.pending_count(conn),
+            "unpushed": db.unpushed_count(conn),
+        }
+    finally:
+        conn.close()
+
+
+def make_server(
+    cfg: Config, secret: Optional[str] = None, host: Optional[str] = None, port: Optional[int] = None
+) -> ThreadingHTTPServer:
+    """Build (but do not start) the endpoint; useful for tests and for systemd."""
+    if secret is None:
+        secret = coordination.load_secret(cfg.shared_secret_file)
+    if not secret:
+        raise ValueError(
+            "coordination secret is missing: %s (see docs/COORDINATION.md)"
+            % (cfg.shared_secret_file,)
+        )
+    handler = type("BoundCoordHandler", (CoordHandler,), {"cfg": cfg, "secret": secret})
+    bind = host or cfg.coord_bind
+    number = int(port if port is not None else cfg.coord_port)
+    server = ThreadingHTTPServer((bind, number), handler)
+    server.daemon_threads = True
+    return server
+
+
+def serve(cfg: Config, host: Optional[str] = None, port: Optional[int] = None) -> int:
+    """Serve until interrupted; returns a process exit code."""
+    server = make_server(cfg, host=host, port=port)
+    address = server.server_address
+    log.log(
+        cfg,
+        "coord: leader endpoint on %s:%s (mode=%s, node=%s)"
+        % (address[0], address[1], coordination.mode_of(cfg), cfg.node_id or "unset"),
+    )
+    if coordination.mode_of(cfg) != coordination.MODE_LEADER:
+        log.log(
+            cfg,
+            "coord: warning: mode is %r, so this node will not report pushed events"
+            % coordination.mode_of(cfg),
+        )
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:  # pragma: no cover - interactive use
+        log.log(cfg, "coord: stopping on interrupt")
+    finally:
+        server.server_close()
+    return 0
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="abuseipdb-coord",
+        description="Leader endpoint that accepts events pushed by follower nodes.",
+    )
+    parser.add_argument("--config", default=None, help="path to reporter.conf")
+    parser.add_argument("--bind", default=None, help="override coord_bind")
+    parser.add_argument("--port", type=int, default=None, help="override coord_port")
+    parser.add_argument(
+        "--check", action="store_true", help="validate the configuration and exit"
+    )
+    parser.add_argument("--version", action="version", version="%(prog)s " + __version__)
+    args = parser.parse_args(argv)
+
+    cfg = load_config(args.config)
+    mode = coordination.mode_of(cfg)
+    bind = args.bind or cfg.coord_bind
+    port = int(args.port or cfg.coord_port)
+
+    if args.check:
+        secret = coordination.load_secret(cfg.shared_secret_file)
+        print("mode: %s" % mode)
+        print("node_id: %s" % (cfg.node_id or "(unset)"))
+        print("bind: %s:%d" % (bind, port))
+        print(
+            "secret: %s"
+            % ("present" if secret else "MISSING (%s)" % cfg.shared_secret_file)
+        )
+        return 0 if secret else 2
+
+    if mode == coordination.MODE_FOLLOWER:
+        print(
+            "error: this node is a follower; the endpoint belongs to the leader "
+            "(set [coordination] mode = leader there)",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        return serve(cfg, host=args.bind, port=args.port)
+    except ValueError as error:
+        print("error: %s" % error, file=sys.stderr)
+        return 1
+    except OSError as error:
+        print("error: cannot bind %s:%d: %s" % (bind, port, error), file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())

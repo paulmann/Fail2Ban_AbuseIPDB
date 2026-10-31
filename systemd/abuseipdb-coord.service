@@ -1,0 +1,42 @@
+[Unit]
+Description=fail2ban -> AbuseIPDB coordination endpoint (leader only)
+Documentation=file:/etc/abuseipdb/reporter.conf
+After=network-online.target
+Wants=network-online.target
+# Installed but NOT enabled: the endpoint is opt-in and belongs to the leader of a
+# coordinated group. Enable it only after setting [coordination] mode = leader and
+# creating the shared secret (see docs/COORDINATION.md).
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/abuseipdb-coord
+Restart=on-failure
+RestartSec=5s
+
+# The endpoint only queues events; it never talks to AbuseIPDB.
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Tunables:
+#   IPAddressAllow=10.0.0.0/8 192.168.0.0/16   # optional: restrict who may connect
+ReadWritePaths=/var/lib/abuseipdb /var/log /run
+
+[Install]
+WantedBy=multi-user.target

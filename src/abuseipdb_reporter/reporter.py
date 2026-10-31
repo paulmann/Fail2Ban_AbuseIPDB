@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-from . import __version__, api, comments, db, evidence, log, status
+from . import __version__, api, comments, coordination, db, evidence, log, status
 from .config import Config
 
 #: injectable HTTP function signature: (url, api_key, fields, timeout) ->
@@ -111,6 +111,39 @@ def _publish(
         log.log(cfg, "report: status write failed: %r" % (error,))
 
 
+def _run_follower(
+    cfg: Config, result: RunResult, now: int, dry_run: bool
+) -> RunResult:
+    """Follower role: hand queued events to the leader, never call the API.
+
+    ``result.sent`` counts events the leader acknowledged; ``pending`` counts
+    events still waiting for delivery, so a growing number is a real symptom
+    (leader down, wrong secret) rather than a normal steady state.
+    """
+    conn = db.connect(cfg.db_path)
+    try:
+        if dry_run:
+            batch = coordination.pending_batch(cfg, conn)
+            result.payloads.extend(batch)
+            result.stopped_reason = "follower dry-run"
+            log.log(cfg, "coord: dry-run, would push %d event(s)" % len(batch))
+        else:
+            pushed, reason = coordination.push_pending(cfg, conn)
+            result.sent = pushed
+            result.stopped_reason = "follower (%s)" % reason
+            log.log(
+                cfg,
+                "coord: follower run done pushed=%d pending=%d (%s)"
+                % (pushed, db.unpushed_count(conn), reason),
+            )
+        db.cleanup(conn, int(cfg.retention_days), now=now)
+        result.pending = db.unpushed_count(conn)
+    finally:
+        conn.close()
+    _publish(cfg, result, now, dry_run=dry_run)
+    return result
+
+
 def run_once(
     cfg: Config,
     now: Optional[int] = None,
@@ -120,18 +153,20 @@ def run_once(
     """Process the queue once.  Returns counters and (for dry-run) payloads."""
     http = http or api.request
     result = RunResult()
+    now = int(now if now is not None else time.time())
     if not cfg.enabled:
         result.stopped_reason = "disabled"
         log.log(cfg, "report: disabled in config")
         _publish(cfg, result, now, dry_run=dry_run)
         return result
+    if coordination.is_follower(cfg):
+        return _run_follower(cfg, result, now, dry_run)
     if not cfg.api_key and not dry_run:
         result.stopped_reason = "missing api key"
         log.log(cfg, "report: ERROR api_key is empty")
         _publish(cfg, result, now, dry_run=dry_run)
         return result
 
-    now = int(now if now is not None else time.time())
     conn = db.connect(cfg.db_path)
     try:
         today = day_start(now, getattr(cfg, "daily_budget_timezone", "utc"))

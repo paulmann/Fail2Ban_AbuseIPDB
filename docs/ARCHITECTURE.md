@@ -175,6 +175,26 @@ configured, to `prometheus_textfile`. Both files are replaced atomically
 document. Writing is best effort: an unwritable directory is logged and the run
 still counts as successful. Dry runs skip it entirely.
 
+### Multi-host coordination (optional)
+
+When several hosts share one AbuseIPDB account, only the **leader** may report -
+the limits are per account, so `n` independent reporters spend the budget `n`
+times faster and break the per-IP interval between hosts.
+
+| Role | Path |
+|---|---|
+| `follower` | `abuseipdb-report` → `coordination.push_pending()` → `POST /v1/push` → mark `events.pushed = 1` |
+| `leader` | `abuseipdb-coord` accepts the batch → filters it (valid address, not ignored, jail not skipped) → `db.enqueue()` into the leader's own queue → the normal worker reports it |
+
+The `pushed` column is added by an in-place migration in `db.connect()`, is
+excluded from every local reporting query, and is cleaned up by
+`retention_days`. A lost acknowledgement is harmless: the follower retries the
+same batch and the leader's 5-minute deduplication answers `inserted: 0`.
+
+There is no election and no shared lease on purpose: failover is a documented
+manual procedure (move the key, switch `mode`), which cannot split the budget
+between two leaders the way a broken quorum can.
+
 ## Scheduling
 
 * **systemd timer** (default): `OnBootSec=3min`, `OnUnitActiveSec=16min`,
@@ -196,6 +216,7 @@ from processing the same queue at once.
 | API key revoked | 401, run stops, error in the log, queue intact |
 | daily quota exhausted | run stops until the next budget day (00:00 UTC by default) |
 | database locked | SQLite busy timeout (10 s) and WAL mode; the enqueue path retries 3 times with backoff |
+| leader unreachable (follower) | events stay queued, retried every tick; nothing is marked delivered |
 | disk full | enqueue logs an error, the ban still works |
 | host reboot | queue is on disk; `Persistent=true` runs the missed tick |
 | fail2ban restart | `norestored = 1` prevents duplicate reports for restored bans |

@@ -77,14 +77,17 @@ jails you pass.
 | `/usr/local/sbin/abuseipdb-report` | worker: sends queued reports (timer/cron) |
 | `/usr/local/sbin/abuseipdb-enqueue` | queue helper, called by the fail2ban action |
 | `/usr/local/sbin/abuseipdb-upgrade` | self-update client (`--check` / `--upgrade`) |
+| `/usr/local/sbin/abuseipdb-coord` | leader endpoint for follower nodes (opt-in, see [COORDINATION.md](COORDINATION.md)) |
 | `/etc/abuseipdb/reporter.conf` | configuration, **mode 600** (no secrets) |
 | `/etc/abuseipdb/.abuseipdb.key` | API key, **mode 600**, never touched by updates |
+| `/etc/abuseipdb/.coord.secret` | optional shared secret for coordination, **mode 600** (created by you, never by the installer) |
 | `/var/lib/abuseipdb/abuseipdb.sqlite3` | local queue and report journal |
 | `/var/lib/fail2ban-abuseipdb/install-state` | state of the first installation, for clean uninstall |
 | `/var/backups/fail2ban-abuseipdb/pristine-<timestamp>/` | copies of files that existed before the first installation |
 | `/etc/fail2ban/action.d/abuseipdb-async.conf` | the fail2ban action |
 | `/etc/fail2ban/jail.d/50-abuseipdb-reporter.local` | attaches the action to the selected jails |
 | `/etc/systemd/system/abuseipdb-report.{service,timer}` | schedule (16 minutes) |
+| `/etc/systemd/system/abuseipdb-coord.service` | coordination endpoint, installed but **never enabled** |
 | `/etc/cron.d/abuseipdb-reporter` | alternative schedule when `--cron` is used |
 | `/etc/logrotate.d/abuseipdb-reporter` | log rotation |
 | `/var/log/abuseipdb-reporter.log` | reporter log |

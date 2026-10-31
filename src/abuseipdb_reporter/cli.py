@@ -8,7 +8,7 @@ import sys
 import tempfile
 from typing import List, Optional
 
-from . import __version__, api, db, enqueue, keys, log, reporter, status
+from . import __version__, api, coordination, db, enqueue, keys, log, reporter, status
 from .config import Config, load_config
 
 #: Lock locations tried in order; the first writable one wins.  ``/run`` is the
@@ -66,6 +66,7 @@ def _stats_text(cfg: Config) -> str:
         lines = ["db: %s" % cfg.db_path]
         for label, query, args in (
             ("pending events", "SELECT COUNT(*) FROM events WHERE reported=0", ()),
+            ("pushed to leader", "SELECT COUNT(*) FROM events WHERE reported=0 AND pushed=1", ()),
             ("pending ips", "SELECT COUNT(DISTINCT ip) FROM events WHERE reported=0", ()),
             ("invalid (2)", "SELECT COUNT(*) FROM events WHERE reported=2", ()),
             ("gave up (3)", "SELECT COUNT(*) FROM events WHERE reported=3", ()),
@@ -99,6 +100,36 @@ def _stats_text(cfg: Config) -> str:
     except sqlite3.Error as error:
         lines.append("fail2ban db: %r" % (error,))
     return "\n".join(lines)
+
+
+def _coord_status(cfg: Config) -> int:
+    """Show the coordination role and, for a follower, the leader's own status."""
+    mode = coordination.mode_of(cfg)
+    print("mode: %s" % mode)
+    print("node_id: %s" % (cfg.node_id or "(unset)"))
+    if mode == coordination.MODE_FOLLOWER:
+        print("leader_url: %s" % (cfg.leader_url or "(unset)"))
+        secret = coordination.load_secret(cfg.shared_secret_file)
+        print(
+            "secret: %s"
+            % ("present" if secret else "MISSING (%s)" % cfg.shared_secret_file)
+        )
+        if not secret or not cfg.leader_url:
+            return 2
+        client = coordination.LeaderClient(cfg.leader_url, secret, timeout=int(cfg.timeout))
+        payload = client.get_status()
+        if payload is None:
+            print("leader: unreachable")
+            return 1
+        print("leader: %s" % json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return 0
+    conn = db.connect(cfg.db_path)
+    try:
+        print("pending: %d" % db.pending_count(conn))
+        print("unpushed: %d" % db.unpushed_count(conn))
+    finally:
+        conn.close()
+    return 0
 
 
 def _key_status(cfg: Config) -> str:
@@ -162,6 +193,11 @@ def main_report(argv: Optional[List[str]] = None) -> int:
         help="print the machine-readable status of the last run (JSON)",
     )
     parser.add_argument(
+        "--coord-status",
+        action="store_true",
+        help="show the coordination role and (for a follower) the leader status",
+    )
+    parser.add_argument(
         "--no-prompt",
         action="store_true",
         help="never ask for the key interactively (for systemd/cron)",
@@ -195,6 +231,9 @@ def main_report(argv: Optional[List[str]] = None) -> int:
         print(_key_status(cfg))
         return 0
 
+    if args.coord_status:
+        return _coord_status(cfg)
+
     if args.status:
         payload = status.read(cfg.status_path)
         if payload is None:
@@ -215,10 +254,12 @@ def main_report(argv: Optional[List[str]] = None) -> int:
             print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         return 0
 
-    key = _resolve_key_for_run(cfg, args.api_key, args.no_prompt)
-    if key is None:
-        return 2
-    cfg.api_key = key
+    # A follower never calls the API, so it must not be forced to have a key.
+    if not coordination.is_follower(cfg):
+        key = _resolve_key_for_run(cfg, args.api_key, args.no_prompt)
+        if key is None:
+            return 2
+        cfg.api_key = key
 
     lock = acquire_lock()
     if lock is False:
@@ -273,6 +314,12 @@ def main_upgrade(argv: Optional[List[str]] = None) -> int:
     from .updater import main_upgrade as _main_upgrade
 
     return _main_upgrade(argv)
+
+
+def main_coord(argv: Optional[List[str]] = None) -> int:
+    from .coord_server import main as _main_coord
+
+    return _main_coord(argv)
 
 
 if __name__ == "__main__":  # pragma: no cover

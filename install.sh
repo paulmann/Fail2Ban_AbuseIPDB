@@ -9,7 +9,7 @@
 set -euo pipefail
 
 PROG="$(basename "$0")"
-VERSION="1.2.1"
+VERSION="1.3.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 PREFIX="/usr/local"
@@ -257,7 +257,8 @@ check_layout() {
               systemd/abuseipdb-report.timer logrotate/abuseipdb-reporter cron/abuseipdb-reporter \
               systemd/abuseipdb-upgrade-check.service systemd/abuseipdb-upgrade-check.timer \
               cron/abuseipdb-upgrade-check updater.json \
-              bin/abuseipdb-enqueue bin/abuseipdb-report bin/abuseipdb-upgrade; do
+              bin/abuseipdb-enqueue bin/abuseipdb-report bin/abuseipdb-upgrade \
+              bin/abuseipdb-coord systemd/abuseipdb-coord.service; do
     if [ ! -e "$SCRIPT_DIR/$item" ]; then
       warn "missing project file: $item"
       missing=1
@@ -373,6 +374,7 @@ install_code() {
   install_file "$SCRIPT_DIR/bin/abuseipdb-enqueue" "$(path "$PREFIX/sbin/abuseipdb-enqueue")" 755
   install_file "$SCRIPT_DIR/bin/abuseipdb-report"  "$(path "$PREFIX/sbin/abuseipdb-report")"  755
   install_file "$SCRIPT_DIR/bin/abuseipdb-upgrade" "$(path "$PREFIX/sbin/abuseipdb-upgrade")" 755
+  install_file "$SCRIPT_DIR/bin/abuseipdb-coord"   "$(path "$PREFIX/sbin/abuseipdb-coord")"   755
 }
 
 install_config() {
@@ -444,6 +446,9 @@ install_scheduler() {
                  "$(path "/etc/systemd/system/abuseipdb-report.service")" 644
     install_file "$SCRIPT_DIR/systemd/abuseipdb-report.timer" \
                  "$(path "/etc/systemd/system/abuseipdb-report.timer")" 644
+    # installed but never enabled: the coordination endpoint is opt-in (mode = leader)
+    install_file "$SCRIPT_DIR/systemd/abuseipdb-coord.service" \
+                 "$(path "/etc/systemd/system/abuseipdb-coord.service")" 644
     run systemctl daemon-reload
     run systemctl enable --now abuseipdb-report.timer
     info "systemd timer enabled: abuseipdb-report.timer (every 16 minutes)"
@@ -512,6 +517,7 @@ $(printf '%s' "$c_green")Fail2Ban_AbuseIPDB installed$(printf '%s' "$c_reset")
 
   code:      $PREFIX/lib/abuseipdb_reporter, $PREFIX/sbin/abuseipdb-report
              $PREFIX/sbin/abuseipdb-enqueue, $PREFIX/sbin/abuseipdb-upgrade
+             $PREFIX/sbin/abuseipdb-coord (leader endpoint, opt-in)
   config:    /etc/abuseipdb/reporter.conf (mode 600)
   api key:   $KEY_FILE (mode 600, never overwritten by updates)
   queue:     /var/lib/abuseipdb/abuseipdb.sqlite3
@@ -570,6 +576,7 @@ uninstall() {
   else
     warn "install state not found ($state); removing well-known paths"
     run rm -f "$(path "$PREFIX/sbin/abuseipdb-report")" "$(path "$PREFIX/sbin/abuseipdb-enqueue")"
+    run rm -f "$(path "$PREFIX/sbin/abuseipdb-coord")" "$(path "$PREFIX/sbin/abuseipdb-upgrade")"
     run rm -rf "$(path "$PREFIX/lib/abuseipdb_reporter")"
     run rm -f "$(path "/etc/fail2ban/action.d/abuseipdb-async.conf")"
     run rm -f "$(path "/etc/fail2ban/jail.d/50-abuseipdb-reporter.local")"
@@ -577,6 +584,7 @@ uninstall() {
                "$(path "/etc/systemd/system/abuseipdb-report.timer")"
     run rm -f "$(path "/etc/systemd/system/abuseipdb-upgrade-check.service")" \
                "$(path "/etc/systemd/system/abuseipdb-upgrade-check.timer")"
+    run rm -f "$(path "/etc/systemd/system/abuseipdb-coord.service")"
     run rm -f "$(path "/etc/cron.d/abuseipdb-reporter")" \
                "$(path "/etc/cron.d/abuseipdb-upgrade-check")" \
                "$(path "/etc/logrotate.d/abuseipdb-reporter")"

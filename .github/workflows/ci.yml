@@ -30,6 +30,7 @@ jobs:
         run: |
           python bin/abuseipdb-report --help
           python bin/abuseipdb-enqueue --help
+          python bin/abuseipdb-coord --help
 
   integration:
     name: integration (mock AbuseIPDB)
@@ -41,6 +42,8 @@ jobs:
           python-version: "3.13"
       - name: End-to-end test
         run: bash tests/integration/run_integration.sh
+      - name: End-to-end test (status, metrics, coordination)
+        run: python tools/e2e_local.py
 
   shellcheck:
     name: shellcheck
@@ -66,6 +69,7 @@ jobs:
           # /etc/abuseipdb is mode 700 root, so verify as root
           sudo test -f /tmp/stage/usr/local/sbin/abuseipdb-report
           sudo test -f /tmp/stage/usr/local/sbin/abuseipdb-enqueue
+          sudo test -f /tmp/stage/usr/local/sbin/abuseipdb-coord
           sudo test -f /tmp/stage/usr/local/lib/abuseipdb_reporter/cli.py
           sudo test -f /tmp/stage/etc/abuseipdb/reporter.conf
           sudo test -f /tmp/stage/etc/fail2ban/action.d/abuseipdb-async.conf
@@ -89,6 +93,7 @@ jobs:
         run: |
           sudo bash install.sh --root /tmp/stage --uninstall
           sudo test ! -f /tmp/stage/usr/local/sbin/abuseipdb-report
+          sudo test ! -f /tmp/stage/usr/local/sbin/abuseipdb-coord
           sudo test ! -f /tmp/stage/etc/fail2ban/jail.d/50-abuseipdb-reporter.local
           # the key file and config survive a normal uninstall
           sudo test -f /tmp/stage/etc/abuseipdb/.abuseipdb.key

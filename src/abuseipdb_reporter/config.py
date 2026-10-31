@@ -21,6 +21,7 @@ DEFAULT_FAIL2BAN_DB = "/var/lib/fail2ban/fail2ban.sqlite3"
 DEFAULT_API_URL = "https://api.abuseipdb.com/api/v2/report"
 DEFAULT_CHECK_URL = "https://api.abuseipdb.com/api/v2/check"
 DEFAULT_KEY_FILE = "/etc/abuseipdb/.abuseipdb.key"
+DEFAULT_COORD_SECRET_FILE = "/etc/abuseipdb/.coord.secret"
 DEFAULT_UPDATE_MANIFEST_URL = (
     "https://raw.githubusercontent.com/paulmann/Fail2Ban_AbuseIPDB/main/updater.json"
 )
@@ -58,6 +59,10 @@ DEFAULT_CATEGORY_MAP: Dict[str, str] = {
 #: 00:00 UTC, so ``utc`` is the safe default; ``local`` keeps the old
 #: behaviour for hosts whose operator prefers their own midnight.
 BUDGET_TIMEZONES = ("utc", "local")
+
+#: Coordination roles: ``none`` (standalone), ``leader`` (reports and accepts
+#: pushed events) and ``follower`` (only pushes events to the leader).
+COORDINATION_MODES = ("none", "leader", "follower")
 
 #: Ranges that must never be reported: our own/trusted hosts, private,
 #: loopback, reserved and documentation networks.
@@ -99,6 +104,12 @@ def _as_timezone(value, default: str = "utc") -> str:
     if text in ("server", "system", "localtime"):
         return "local"
     return default
+
+
+def _as_mode(value, default: str = "none") -> str:
+    """Normalise ``coordination.mode``; an unknown role means "standalone"."""
+    text = str(value or "").strip().lower()
+    return text if text in COORDINATION_MODES else default
 
 
 def parse_ranges(raw: str) -> Tuple[ipaddress._BaseNetwork, ...]:
@@ -149,6 +160,14 @@ class Config:
     attribution: bool = True
     attribution_text: str = DEFAULT_ATTRIBUTION
     log_path: str = DEFAULT_LOG_PATH
+    #: Coordination role and its settings (see docs/COORDINATION.md).
+    coordination_mode: str = "none"
+    node_id: str = ""
+    leader_url: str = ""
+    shared_secret_file: str = DEFAULT_COORD_SECRET_FILE
+    coord_port: int = 8765
+    coord_bind: str = "127.0.0.1"
+    push_batch_size: int = 50
     #: Empty by default: a directly constructed Config (tests, embedders) must
     #: not write files outside its own directory.  ``load_config`` fills the
     #: default path from ``[logging] status_path``.
@@ -229,6 +248,18 @@ def load_config(path: Optional[str] = None, quiet: bool = False) -> Config:
         attribution_text=get("report", "attribution_text", DEFAULT_ATTRIBUTION).strip()
         or DEFAULT_ATTRIBUTION,
         log_path=get("logging", "path", DEFAULT_LOG_PATH).strip() or DEFAULT_LOG_PATH,
+        coordination_mode=_as_mode(get("coordination", "mode", "none")),
+        node_id=get("coordination", "node_id", "").strip(),
+        leader_url=get("coordination", "leader_url", "").strip(),
+        shared_secret_file=(
+            get("coordination", "shared_secret_file", DEFAULT_COORD_SECRET_FILE).strip()
+            or DEFAULT_COORD_SECRET_FILE
+        ),
+        coord_port=min(65535, max(1, _as_int(get("coordination", "coord_port", "8765"), 8765))),
+        coord_bind=get("coordination", "coord_bind", "127.0.0.1").strip() or "127.0.0.1",
+        push_batch_size=min(
+            5000, max(1, _as_int(get("coordination", "push_batch_size", "50"), 50))
+        ),
         status_path=get("logging", "status_path", DEFAULT_STATUS_PATH).strip(),
         prometheus_textfile=get("logging", "prometheus_textfile", "").strip(),
         ignore_ranges=parse_ranges(ranges_raw),
