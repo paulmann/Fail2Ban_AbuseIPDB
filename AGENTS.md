@@ -1,9 +1,9 @@
-# AGENTS.md — Fail2Ban_AbuseIPDB 1.4.1
+# AGENTS.md — Fail2Ban_AbuseIPDB 1.4.2
 
 Agent-facing guide: how to install Fail2Ban_AbuseIPDB, run it, and report problems responsibly.
 Human documentation: [README.md](README.md), [docs/](docs/), [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki).
 
-> Verified against repository state on 2026-11-01. Version covered: 1.4.1 (tag `v1.4.1`, released 2026-11-01).
+> Verified against repository state on 2026-11-01. Version covered: 1.4.2 (tag `v1.4.2`, released 2026-11-01).
 
 ## 1. What it is
 
@@ -34,10 +34,10 @@ If a check fails, stop and report; do not work around it silently.
 
 ### 3.1 From a release
 
-Releases verified with `gh release list -R paulmann/Fail2Ban_AbuseIPDB`: `v1.3.0` (latest), `v1.2.1`, `v1.2.0`, `v1.1.1`, `v1.1.0`, `v1.0.0`. The v1.3.0 asset is `Fail2Ban_AbuseIPDB-1.3.0.tar.gz`; its SHA-256 is authoritative in [`updater.json`](updater.json), which the updater verifies before running the bundled `install.sh` - never trust a checksum quoted in prose. The repository does not document a manual install from the downloaded archive; the documented consumer of that asset is `abuseipdb-upgrade` ([docs/UPDATE.md](docs/UPDATE.md)). For a first install, pin the verified tag in a checkout:
+Releases verified with `gh release list -R paulmann/Fail2Ban_AbuseIPDB`: `v1.4.2` (latest), `v1.4.1`, `v1.4.0`, `v1.3.0`, `v1.2.1`, `v1.2.0`, `v1.1.1`, `v1.1.0`, `v1.0.0`. The v1.4.2 asset is `Fail2Ban_AbuseIPDB-1.4.2.tar.gz`; its SHA-256 is authoritative in [`updater.json`](updater.json), which the updater verifies before running the bundled `install.sh` - never trust a checksum quoted in prose. The repository does not document a manual install from the downloaded archive; the documented consumer of that asset is `abuseipdb-upgrade` ([docs/UPDATE.md](docs/UPDATE.md)). For a first install, pin the verified tag in a checkout:
 
 ```bash
-git clone --branch v1.3.0 --depth 1 https://github.com/paulmann/Fail2Ban_AbuseIPDB.git
+git clone --branch v1.4.2 --depth 1 https://github.com/paulmann/Fail2Ban_AbuseIPDB.git
 cd Fail2Ban_AbuseIPDB
 sudo ./install.sh --api-key "$ABUSEIPDB_API_KEY" --jails "sshd"
 ```
@@ -189,7 +189,7 @@ The scheduler runs the worker every 16 minutes (systemd timer with `Persistent=t
 ## 8. Limits
 
 - Deployment is Linux-only (fail2ban action + systemd/cron); the Python package and test suite run on any platform, but Windows and macOS are not supported as deployment targets.
-- No pip, no virtualenv, no daemon: standard library only, so packaging constraints are Python 3.9 syntax and Fail2Ban 0.10+. The **package** is published on PyPI as [`fail2ban-abuseipdb-reporter`](https://pypi.org/project/fail2ban-abuseipdb-reporter/) (wheel + sdist) and can be installed with `pip` to get the four CLIs and the library - but a pip install does **not** touch fail2ban, systemd, the key file or `/etc/abuseipdb`; the supported host deployment is `install.sh` and `abuseipdb-upgrade`.
+- No pip, no virtualenv, no daemon: standard library only, so packaging constraints are Python 3.9 syntax and Fail2Ban 0.10+. The **package** is published on PyPI as [`fail2ban-abuseipdb-reporter`](https://pypi.org/project/fail2ban-abuseipdb-reporter/) (wheel + sdist, uploaded by the release workflow through OIDC trusted publishing - no token is stored in the repository or on the runner) and can be installed with `pip` to get the four CLIs and the library - but a pip install does **not** touch fail2ban, systemd, the key file or `/etc/abuseipdb`; the supported host deployment is `install.sh` and `abuseipdb-upgrade`.
 - Proxy support for egress is not provided out of the box; `api_url`/`check_url` are the only documented overrides ([docs/INSTALL.md](docs/INSTALL.md)).
 - Rate caps are deliberate: 20 minutes per IP, 25 reports per run, 900 per day (AbuseIPDB free plan allows 1000 requests/day and one report per IP per 15 minutes). The daily budget day starts at 00:00 UTC by default.
 - Coordination supports **one leader**: there is no election and no shared lease, so failover is a manual procedure (move the key file, switch `mode`, restart the endpoint). Never run two leaders with the same key - that doubles the account budget consumption and breaks the per-IP interval between hosts.
@@ -203,6 +203,7 @@ The scheduler runs the worker every 16 minutes (systemd timer with `Persistent=t
 - [README.md](README.md) - product behaviour, installer and CLI reference, compatibility, report anatomy.
 - [docs/INSTALL.md](docs/INSTALL.md) - requirements, installer options, installed paths, verification, upgrade, uninstall, manual install.
 - [docs/CONFIGURATION.md](docs/CONFIGURATION.md) - every configuration key, key resolution, rate limits, environment variables.
+- [docs/RELEASING.md](docs/RELEASING.md) - maintainer release path: version bump, tag, CI publish to PyPI over OIDC trusted publishing, `updater.json`.
 - [docs/UPDATE.md](docs/UPDATE.md) - update manifest, `--check`/`--upgrade` semantics, rollback, weekly check.
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - diagnosis recipes used in section 7.
 - `install.sh` (`VERSION="1.3.0"`, `usage()`, exit paths), `config/reporter.conf.example`, `fail2ban/action.d/abuseipdb-async.conf`, `systemd/abuseipdb-report.{service,timer}`, `systemd/abuseipdb-coord.service`, `cron/abuseipdb-reporter`, `logrotate/abuseipdb-reporter` - host changes and defaults.

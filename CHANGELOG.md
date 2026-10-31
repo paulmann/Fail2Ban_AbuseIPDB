@@ -4,6 +4,26 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.2] - 2026-11-01
+
+### Changed
+
+* **Publishing to PyPI moved to the CI workflow, with Trusted Publishing.**
+  `.github/workflows/release.yml` now declares `environment: pypi` and
+  `id-token: write` and uploads the wheel and the sdist with
+  `pypa/gh-action-pypi-publish`, so no password and no API token is stored in the
+  repository or on the runner. GitHub mints a short-lived OIDC token, PyPI
+  exchanges it for an upload token scoped to this repository and workflow, and
+  the action also attaches PEP 740 attestations to the files.
+* New [`docs/RELEASING.md`](docs/RELEASING.md): the maintainer path end to end
+  (version bump, changelog, tag, what CI does, `updater.json`, what each upload
+  error means).
+
+### Not changed
+
+Runtime code, configuration and the queue schema are identical to 1.4.1: this
+release ships the build pipeline, not new behaviour.
+
 ## [1.4.1] - 2026-11-01
 
 ### Fixed
@@ -246,3 +266,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 [1.3.0]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.3.0
 [1.4.0]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.0
 [1.4.1]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.1
+[1.4.2]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.2

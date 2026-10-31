@@ -20,7 +20,7 @@ Fail2Ban knows **who** attacked and **why**. AbuseIPDB wants a short factual rep
 
 This project separates the two paths. The ban stays local and instant. A small SQLite queue stores what happened. A scheduled worker (systemd timer or cron, every 16 minutes) turns the queue into evidence-backed reports, respects AbuseIPDB rate limits, retries failures and never blocks the firewall. The API key lives in its own file, and `abuseipdb-upgrade` updates the installation from GitHub without losing the key, the configuration, the queue or the jail list.
 
-> **Documentation status.** Counts in this README were re-measured from the working tree on 2026-11-01 (v1.4.0): 183 tests, 16 source modules, 89 tracked files, 20 wiki pages. The operator-facing long-form documentation lives in the [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki); the design-level documents live under [`docs/`](docs/).
+> **Documentation status.** Counts in this README were re-measured from the working tree on 2026-11-01 (v1.4.2): 183 tests, 16 source modules, 90 tracked files, 20 wiki pages. The operator-facing long-form documentation lives in the [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki); the design-level documents live under [`docs/`](docs/).
 
 ---
 
@@ -137,7 +137,7 @@ Measured from the working tree on 2026-11-01 (v1.4.0):
 | Tests | **183** passing (1 skipped on Windows only) | `python -m unittest discover -s tests -t .` |
 | Test code | 16 files · 2,662 lines | `tests/` |
 | Installer and shell tooling | 863 lines | `*.sh` + `tests/integration/*.sh` |
-| Documentation pages | 13 · 1,757 lines | `docs/*.md` |
+| Documentation pages | 15 · 1,921 lines | `docs/*.md` |
 | Wiki pages | 20 | `Fail2Ban_AbuseIPDB.wiki` |
 | Tracked files | 86 | `git ls-files` |
 | Runtime dependencies | **0** | `pyproject.toml` (none) |
@@ -767,6 +767,7 @@ Windows and macOS are not supported for deployment (the fail2ban action and the 
 | [`docs/COORDINATION.md`](docs/COORDINATION.md) | leader/follower roles for one shared AbuseIPDB account: setup, security, failover |
 | [`docs/UPDATE.md`](docs/UPDATE.md) | manifest format, self-update steps, safety rules, rollback |
 | [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | diagnosis → action → verification recipes |
+| [`docs/RELEASING.md`](docs/RELEASING.md) | maintainer release path: version bump, tag, CI publish to PyPI over OIDC trusted publishing, updater.json |
 | [`CHANGELOG.md`](CHANGELOG.md) | release history |
 | [`SECURITY.md`](SECURITY.md) | vulnerability reporting policy |
 
