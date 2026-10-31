@@ -1,11 +1,11 @@
 {
   "name": "Fail2Ban_AbuseIPDB",
-  "version": "1.1.1",
-  "released": "2026-10-20",
+  "version": "1.2.0",
+  "released": "2026-10-31",
   "requires_python": ">=3.9",
-  "tarball": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/download/v1.1.1/Fail2Ban_AbuseIPDB-1.1.1.tar.gz",
-  "sha256": "4d612d52ff3be034cff0303d4d913ab5f9891c08be41157b9390f232facd77a3",
-  "release_notes": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.1.1",
+  "tarball": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/download/v1.2.0/Fail2Ban_AbuseIPDB-1.2.0.tar.gz",
+  "sha256": "c93bd8bf48a8f1724713e1aba3d0873ef79f237da4e74ec94df143ea060da855",
+  "release_notes": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.2.0",
   "changelog": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/blob/main/CHANGELOG.md",
-  "notes": "v1.1.1: installer places api_key_file into [abuseipdb] on upgrade; key file preserved."
+  "notes": "v1.2.0: status.json and optional Prometheus textfile, Retry-After handling and adaptive backoff, UTC-aligned daily budget, classifier registry for more jails, percent-encoded SQL injection, queue lock retry, hardened systemd unit."
 }
