@@ -140,6 +140,23 @@ cat /etc/cron.d/abuseipdb-reporter              # cron
 
 ## Manual installation
 
+### From PyPI
+
+The package is on PyPI as
+[`fail2ban-abuseipdb-reporter`](https://pypi.org/project/fail2ban-abuseipdb-reporter/):
+
+```bash
+python3 -m pip install fail2ban-abuseipdb-reporter
+abuseipdb-report --version
+```
+
+That gives you the four CLIs and the library, but **no** host integration: no
+fail2ban action, no jail snippet, no timer, no key file. Combine it with the
+project checkout when you want both, or run the hooks from your own configuration
+management. The supported full deployment stays `install.sh`.
+
+### By hand
+
 If you prefer not to run the installer:
 
 ```bash

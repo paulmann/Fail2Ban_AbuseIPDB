@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 * `--stats` prints a `pushed to leader` counter.
+* **Published on PyPI** as [`fail2ban-abuseipdb-reporter`](https://pypi.org/project/fail2ban-abuseipdb-reporter/):
+  wheel and sdist with PEP 639 license metadata (`license = "MIT"`,
+  `license-files`), a `MANIFEST.in` so the sdist carries the tests, the docs and
+  the host integration files, and `setuptools>=77` as the build requirement. A pip
+  install gives the four CLIs and the library only - the host integration stays
+  with `install.sh`.
 * Coordination HTTP failures keep events queued: a leader outage delays reports
   and never loses them. A lost acknowledgement is absorbed by the leader's
   5-minute deduplication.

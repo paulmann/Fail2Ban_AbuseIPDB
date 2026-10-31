@@ -1,0 +1,32 @@
+# Files that belong in the source distribution (sdist) on PyPI.
+#
+# The wheel contains only the package; the sdist is the "source of truth" copy,
+# so it ships the tests, the operator documentation and the changelog as well.
+include LICENSE
+include README.md
+include CHANGELOG.md
+include CONTRIBUTING.md
+include SECURITY.md
+include pyproject.toml
+
+recursive-include src/abuseipdb_reporter *.py py.typed
+recursive-include tests *.py
+recursive-include docs *.md
+
+# Host integration files: not installed by pip, but useful next to the sources.
+include install.sh
+include uninstall.sh
+include updater.json
+recursive-include bin *
+recursive-include config *.example
+recursive-include fail2ban *
+recursive-include systemd *
+recursive-include cron *
+recursive-include logrotate *
+recursive-include tools *.py
+
+# Never ship local state.
+global-exclude *.py[cod] __pycache__ *.sqlite3 *.log .ragraf .zwork
+prune .ragraf
+prune .zwork
+prune .git

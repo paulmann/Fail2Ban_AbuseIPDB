@@ -8,6 +8,7 @@
 
 [![CI](https://github.com/paulmann/Fail2Ban_AbuseIPDB/actions/workflows/ci.yml/badge.svg)](https://github.com/paulmann/Fail2Ban_AbuseIPDB/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/paulmann/Fail2Ban_AbuseIPDB?label=release&sort=semver)](https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases)
+[![PyPI](https://img.shields.io/pypi/v/fail2ban-abuseipdb-reporter?label=pypi)](https://pypi.org/project/fail2ban-abuseipdb-reporter/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20systemd%20%7C%20cron-lightgrey)](#requirements-and-compatibility)
@@ -223,6 +224,23 @@ git clone https://github.com/paulmann/Fail2Ban_AbuseIPDB.git
 cd Fail2Ban_AbuseIPDB
 sudo ./install.sh
 ```
+
+### From PyPI
+
+The package is published as [`fail2ban-abuseipdb-reporter`](https://pypi.org/project/fail2ban-abuseipdb-reporter/)
+(wheel and sdist, Python 3.9+, no dependencies). Use it when you want the CLI on a
+host where the installer is not wanted, or when you build on top of the library:
+
+```bash
+pip install fail2ban-abuseipdb-reporter==1.3.0
+abuseipdb-report --version
+```
+
+This installs the four entry points (`abuseipdb-report`, `abuseipdb-enqueue`,
+`abuseipdb-upgrade`, `abuseipdb-coord`) into your environment. It does **not**
+touch fail2ban, systemd, the key file or `/etc/abuseipdb` - the host integration
+(action, timer, jail snippet, logrotate, uninstall) stays the job of
+`install.sh`, which is what the release tarball carries.
 
 On a terminal the installer asks for the API key once, hides the input and saves it to `/etc/abuseipdb/.abuseipdb.key` (mode 600). Non-interactive equivalent:
 
