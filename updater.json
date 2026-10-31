@@ -1,11 +1,11 @@
 {
   "name": "Fail2Ban_AbuseIPDB",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "released": "2026-10-31",
   "requires_python": ">=3.9",
-  "tarball": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/download/v1.2.1/Fail2Ban_AbuseIPDB-1.2.1.tar.gz",
-  "sha256": "b29739f5a6329f71316c933e9e4648198d1f35b171f2d2e7c75a4ca3b444e0fd",
-  "release_notes": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.2.1",
+  "tarball": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/download/v1.3.0/Fail2Ban_AbuseIPDB-1.3.0.tar.gz",
+  "sha256": "18605435055f06d44f3a0fcea7929a034c15212ec4ae4fb5cd0b0fb65eacbc68",
+  "release_notes": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.3.0",
   "changelog": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/blob/main/CHANGELOG.md",
-  "notes": "v1.2.1: inline comments in [ignore] ranges no longer drop the network; README, CHANGELOG and CONFIGURATION counts corrected. Includes v1.2.0: status.json and optional Prometheus textfile, Retry-After handling and adaptive backoff, UTC-aligned daily budget, classifier registry for more jails, percent-encoded SQL injection, queue lock retry, hardened systemd unit."
+  "notes": "v1.3.0: optional leader/follower coordination for one shared AbuseIPDB account (abuseipdb-coord, events.pushed migration, --coord-status); includes v1.2.x: status.json and Prometheus metrics, Retry-After and adaptive backoff, UTC budget day, classifier registry, inline comments in [ignore] ranges."
 }
