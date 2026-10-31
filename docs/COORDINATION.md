@@ -164,6 +164,7 @@ Request (follower → leader):
 {
   "node_id": "web-1",
   "since": 1793481600,
+  "jails": ["sshd", "nginx-php-probe"],
   "events": [{"ip": "198.51.100.7", "jail": "sshd", "event_time": 1793481612,
               "bantime": 3600, "failures": 5}]
 }
@@ -191,7 +192,10 @@ Answer (leader → follower):
 * **`to_ban`** - bans created after the follower's `since` that did **not** come
   from that follower: the leader's own bans plus the ones other nodes pushed. An
   event is never echoed back to the node it came from (the `events.origin` column
-  records who reported it).
+  records who reported it). Since 1.4.1 the follower also declares the `jails` it
+  can ban in, and the leader leaves out the rest: a host without
+  `nginx-php-probe` is never asked to ban in it. An absent or empty list means
+  "unknown" and sends everything.
 * **`next_since`** - the new cursor. If the answer is lost, the follower simply
   repeats the request: `to_ban` is idempotent (`fail2ban-client` answers "already
   banned") and the leader's 5-minute deduplication absorbs repeated events.
@@ -230,6 +234,7 @@ Rails, in order:
 | address must parse | garbage from a peer is ignored |
 | `[ignore] ranges` | private, loopback, documentation and your own trusted networks are never banned |
 | own `server_ip` | a node never bans the address it reports from |
+| jail must be in this node's own list (1.4.1) | the node declares its jails; the leader sends nothing else |
 | jail name must match `^[A-Za-z0-9._@-]{1,64}$` | nothing shell-like ever reaches the command (the command is executed without a shell at all) |
 | `max_remote_bans_per_run` (20, ceiling 200) | one sync cannot flood a node with bans |
 | no unban, ever | the feature can only add bans; nothing can lift one |

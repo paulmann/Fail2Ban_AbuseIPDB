@@ -4,6 +4,26 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.1] - 2026-11-01
+
+### Fixed
+
+* **A follower was asked to ban in jails it does not have.** The leader sends my ban
+  list to every node, so a host that runs only `sshd` got ban requests for
+  `nginx-php-probe` and answered `NOK: unable to find jail` - one logged error per
+  address, on every sync, forever. The sync request now declares the jails the node
+  can actually ban in (`fail2ban-client status`, cached for an hour), and the leader
+  leaves out anything else. An unknown or empty list sends everything, exactly as in
+  1.4.0, so a 1.4.0 follower keeps working unchanged.
+* The declared list is validated with the same jail-name pattern as the ban command,
+  so a garbage entry can never widen what is sent.
+
+### Changed
+
+* `max_sync_bans` is applied **after** the jail filter, so the cap counts bans that
+  node can really apply.
+* Tests: **183** (was 175).
+
 ## [1.4.0] - 2026-11-01
 
 ### Added
@@ -225,3 +245,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 [1.2.1]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.2.1
 [1.3.0]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.3.0
 [1.4.0]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.0
+[1.4.1]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.1

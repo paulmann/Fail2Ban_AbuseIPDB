@@ -53,6 +53,13 @@ MODE_NONE = "none"
 MODE_LEADER = "leader"
 MODE_FOLLOWER = "follower"
 
+#: meta key holding the follower's sync cursor
+CURSOR_KEY = "coord_since"
+#: meta key caching the jail list this node can actually ban in
+JAILS_KEY = "coord_jails"
+#: how long the cached jail list is trusted, seconds
+JAILS_TTL = 3600
+
 #: Upper bound on how many events one push may carry (follower side).
 MAX_EVENTS_PER_PUSH = 500
 #: Upper bound on how many events the leader accepts in one request.
@@ -66,9 +73,6 @@ MAX_PROPAGATION_AGE = 2 * 3600
 USER_AGENT = "fail2ban-abuseipdb-coord/1.4"
 #: Jail names fail2ban accepts; anything else is never passed to the CLI.
 JAIL_RE = re.compile(r"^[A-Za-z0-9._@-]{1,64}$")
-#: meta key holding the follower's sync cursor
-CURSOR_KEY = "coord_since"
-
 #: Runner signature: (argv, timeout) -> (returncode, stdout, stderr)
 Runner = Callable[..., Tuple[int, str, str]]
 
@@ -109,6 +113,45 @@ def load_secret(path: str) -> str:
         return ""
 
 
+def _local_jails(
+    cfg: Config, conn, runner: Optional[Runner] = None, now: Optional[int] = None
+) -> List[str]:
+    """Jails this node can actually ban in, cached for :data:`JAILS_TTL`.
+
+    A follower that does not have a jail cannot apply a ban for it:
+    ``fail2ban-client`` answers ``NOK: unable to find jail``, which becomes a logged
+    error per address on every sync.  Declaring the list keeps the leader from
+    sending what would only fail here.  An empty list means "unknown"
+    (fail2ban-client missing or no output) and makes the leader send everything,
+    exactly as in 1.4.0.
+    """
+    moment = int(now if now is not None else time.time())
+    cached = db.get_meta(conn, JAILS_KEY, "")
+    if cached:
+        stamp, _, names = cached.partition("|")
+        try:
+            fresh = moment - int(stamp) < JAILS_TTL
+        except ValueError:
+            fresh = False
+        if fresh:
+            return [name for name in names.split(",") if name]
+    run = runner or _fail2ban_runner
+    code, out, _ = run(["fail2ban-client", "status"], 12)
+    if code != 0 or not out:
+        return []
+    names: List[str] = []
+    for line in out.splitlines():
+        if "Jail list:" in line:
+            _, _, tail = line.partition("Jail list:")
+            names = [
+                item.strip() for item in tail.replace("\t", " ").split(",") if item.strip()
+            ]
+            break
+    names = [name for name in names if JAIL_RE.match(name)]
+    db.set_meta(conn, JAILS_KEY, "%d|%s" % (moment, ",".join(names)))
+    return names
+
+
 def events_to_payload(rows: Sequence) -> List[Dict[str, int]]:
     """Convert pending event rows into a JSON-serialisable list."""
     payload: List[Dict[str, int]] = []
@@ -137,7 +180,9 @@ class LeaderClient:
         parts = urllib.parse.urlsplit(self.url)
         return parts.scheme.lower() in ("http", "https") and bool(parts.netloc)
 
-    def sync(self, node_id: str, events: Sequence[Dict], since: int = 0) -> Tuple[bool, Dict]:
+    def sync(
+        self, node_id: str, events: Sequence[Dict], since: int = 0, jails: Optional[Sequence[str]] = None
+    ) -> Tuple[bool, Dict]:
         """POST one sync request.  Returns ``(delivered, response)``."""
         if not self._url_ok():
             return False, {"error": "leader_url must be an http(s) URL, got %r" % (self.url,)}
@@ -148,6 +193,8 @@ class LeaderClient:
             "events": list(events),
             "since": int(since or 0),
         }
+        if jails:
+            payload["jails"] = [str(name) for name in jails]
         data = json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
             "%s/v1/sync" % self.url,
@@ -305,8 +352,11 @@ def follower_sync(
     rows = db.pending_events_for_push(
         conn, min(int(getattr(cfg, "push_batch_size", 50) or 50), MAX_EVENTS_PER_PUSH)
     )
+    jails = _local_jails(cfg, conn, runner=runner, now=moment) if getattr(cfg, "sync_bans", True) else []
     client = LeaderClient(cfg.leader_url, secret, timeout=int(cfg.timeout))
-    delivered, response = client.sync(cfg.node_id or "unknown", events_to_payload(rows), since)
+    delivered, response = client.sync(
+        cfg.node_id or "unknown", events_to_payload(rows), since, jails=jails
+    )
     if not delivered:
         result.reason = str(response.get("error") or "sync failed")[:200]
         result.pending = db.unpushed_count(conn)
@@ -396,24 +446,35 @@ def sync_response(
     node_id: str,
     events: Sequence,
     since: int = 0,
+    jails: Optional[Sequence[str]] = None,
     now: Optional[int] = None,
 ) -> Dict:
-    """Full leader answer for one follower sync."""
+    """Full leader answer for one follower sync.
+
+    ``jails`` is what the follower says it can ban in; when it is known, bans for
+    any other jail are left out of ``to_ban`` - that node would only answer
+    ``unable to find jail``.  An empty or missing list keeps the old behaviour
+    (send everything), so a 1.4.0 follower is unaffected.
+    """
     moment = int(now if now is not None else time.time())
     counts = accept_events(cfg, events, node_id)
     window = max(int(getattr(cfg, "peer_dedupe_window", 900) or 900), 900)
+    wanted = {str(name) for name in jails or () if JAIL_RE.match(str(name))}
+    limit = int(getattr(cfg, "max_sync_bans", 50) or 50)
     conn = db.connect(cfg.db_path)
     try:
         recently = db.recent_reports(conn, moment - window)
         oldest = max(moment - MAX_PROPAGATION_AGE, int(since or 0))
-        to_ban = db.bans_since(
+        fetched = db.bans_since(
             conn,
             since=oldest,
             exclude_origin=node_id,
-            limit=int(getattr(cfg, "max_sync_bans", 50) or 50),
+            limit=limit * 4 if wanted else limit,
         )
     finally:
         conn.close()
+    if wanted:
+        fetched = [item for item in fetched if item["jail"] in wanted][:limit]
     payload = dict(counts)
     payload.update(
         {
@@ -421,7 +482,7 @@ def sync_response(
             "node_id": cfg.node_id,
             "version": _version(),
             "recently_reported": recently,
-            "to_ban": to_ban,
+            "to_ban": fetched,
             "next_since": moment,
         }
     )

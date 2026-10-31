@@ -3,5 +3,5 @@
 The package is intentionally dependency-free: Python standard library only.
 """
 
-__version__ = "1.4.0"
+__version__ = "1.4.1"
 __all__ = ["__version__"]

@@ -94,11 +94,14 @@ class CoordHandler(BaseHTTPRequestHandler):
             since = int(payload.get("since") or 0)
         except (TypeError, ValueError):
             since = 0
+        raw_jails = payload.get("jails")
+        jails = [str(name) for name in raw_jails] if isinstance(raw_jails, list) else None
         answer = coordination.sync_response(
             self.cfg,
             str(payload.get("node_id") or ""),
             payload["events"],
             since=since,
+            jails=jails,
         )
         self._send(200, answer)
 

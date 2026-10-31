@@ -15,17 +15,23 @@ SECRET = "sync-secret-" + "y" * 30
 class FakeRunner:
     """Records the fail2ban-client calls instead of running them."""
 
-    def __init__(self, code=0, stderr=""):
+    def __init__(self, code=0, stderr="", jails=("sshd",)):
         self.calls = []
         self.code = code
         self.stderr = stderr
+        self.jails = list(jails)
 
     def __call__(self, argv, timeout=12):
         self.calls.append(list(argv))
+        if list(argv)[1:] == ["status"]:
+            return 0, "Status\n`- Jail list:\t%s\n" % ", ".join(self.jails), ""
         return self.code, "", self.stderr
 
     def banned(self):
-        return [call[4] for call in self.calls]
+        return [call[4] for call in self.calls if call[1:2] != ["status"]]
+
+    def ban_calls(self):
+        return [call for call in self.calls if call[1:2] != ["status"]]
 
 
 def write_secret(cfg, value=SECRET):
@@ -233,6 +239,110 @@ class LeaderAnswerTests(TempDirTestCase):
         self.assertEqual(answer["recently_reported"], {"198.51.100.40": int(time.time()) - 60})
 
 
+class JailFilterTests(TempDirTestCase):
+    """A node declares what it can ban in; the leader sends nothing else."""
+
+    def setUp(self):
+        super().setUp()
+        self.cfg.coordination_mode = "leader"
+        self.cfg.node_id = "leader-1"
+        now = int(time.time())
+        conn = db.connect(self.cfg.db_path)
+        try:
+            for ip, jail in (
+                ("198.51.100.11", "sshd"),
+                ("198.51.100.12", "nginx-php-probe"),
+                ("198.51.100.13", "sshd"),
+            ):
+                conn.execute(
+                    "INSERT INTO events(ip, jail, event_time, created_at, origin)"
+                    " VALUES (?,?,?,?,?)",
+                    (ip, jail, now - 5, now - 5, ""),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def test_only_declared_jails_are_sent(self):
+        answer = coordination.sync_response(
+            self.cfg, "web-1", [], since=int(time.time()) - 300, jails=["sshd"]
+        )
+        self.assertEqual(
+            sorted(item["ip"] for item in answer["to_ban"]), ["198.51.100.11", "198.51.100.13"]
+        )
+        self.assertTrue(all(item["jail"] == "sshd" for item in answer["to_ban"]))
+
+    def test_unknown_jail_list_sends_everything(self):
+        answer = coordination.sync_response(
+            self.cfg, "web-1", [], since=int(time.time()) - 300
+        )
+        self.assertEqual(len(answer["to_ban"]), 3)
+
+    def test_empty_list_is_treated_as_unknown(self):
+        answer = coordination.sync_response(
+            self.cfg, "web-1", [], since=int(time.time()) - 300, jails=[]
+        )
+        self.assertEqual(len(answer["to_ban"]), 3)
+
+    def test_garbage_in_the_declared_list_is_ignored(self):
+        answer = coordination.sync_response(
+            self.cfg,
+            "web-1",
+            [],
+            since=int(time.time()) - 300,
+            jails=["sshd", "sshd; rm -rf /", ""],
+        )
+        self.assertEqual(
+            sorted(item["ip"] for item in answer["to_ban"]), ["198.51.100.11", "198.51.100.13"]
+        )
+
+    def test_the_cap_is_applied_after_filtering(self):
+        answer = coordination.sync_response(
+            self.cfg, "web-1", [], since=int(time.time()) - 300, jails=["sshd"], now=int(time.time())
+        )
+        self.cfg.max_sync_bans = 1
+        answer = coordination.sync_response(
+            self.cfg, "web-1", [], since=int(time.time()) - 300, jails=["sshd"]
+        )
+        self.assertEqual(len(answer["to_ban"]), 1)
+
+    def test_local_jails_are_parsed_and_cached(self):
+        conn = db.connect(self.cfg.db_path)
+        try:
+            calls = []
+
+            def runner(argv, timeout=12):
+                calls.append(list(argv))
+                return (
+                    0,
+                    "Status\n|- Number of jail:\t2\n`- Jail list:\tsshd, nginx-php-probe\n",
+                    "",
+                )
+
+            jails = coordination._local_jails(self.cfg, conn, runner=runner, now=1000)
+            self.assertEqual(jails, ["sshd", "nginx-php-probe"])
+            self.assertEqual(calls[0], ["fail2ban-client", "status"])
+            # a second call inside the TTL does not shell out again
+            again = coordination._local_jails(self.cfg, conn, runner=runner, now=1100)
+            self.assertEqual(again, ["sshd", "nginx-php-probe"])
+            self.assertEqual(len(calls), 1)
+            # after the TTL it does
+            coordination._local_jails(self.cfg, conn, runner=runner, now=1000 + coordination.JAILS_TTL + 5)
+            self.assertEqual(len(calls), 2)
+        finally:
+            conn.close()
+
+    def test_missing_fail2ban_client_declares_nothing(self):
+        conn = db.connect(self.cfg.db_path)
+        try:
+            def runner(argv, timeout=12):
+                return 1, "", "No such file or directory"
+
+            self.assertEqual(coordination._local_jails(self.cfg, conn, runner=runner), [])
+        finally:
+            conn.close()
+
+
 class SyncEndToEndTests(TempDirTestCase):
     """Leader endpoint + follower run, on the loopback interface."""
 
@@ -315,9 +425,16 @@ class SyncEndToEndTests(TempDirTestCase):
     def test_second_sync_does_not_repeat_the_ban(self):
         runner = FakeRunner()
         reporter.run_once(self.follower, runner=runner)
-        first = len(runner.calls)
+        first = len(runner.ban_calls())
         reporter.run_once(self.follower, runner=runner)
-        self.assertEqual(len(runner.calls), first)
+        self.assertEqual(len(runner.ban_calls()), first)
+
+    def test_a_node_only_gets_bans_for_jails_it_has(self):
+        # the leader's fixture ban is for sshd; this node has another jail only
+        runner = FakeRunner(jails=("ragraf-sync-test",))
+        result = reporter.run_once(self.follower, runner=runner)
+        self.assertEqual(result.banned, 0)
+        self.assertEqual(runner.banned(), [])
 
     def test_cache_from_the_leader_blocks_a_duplicate_report(self):
         # the leader reports 198.51.100.70 successfully, then a follower gets it
@@ -368,7 +485,7 @@ class SyncEndToEndTests(TempDirTestCase):
         result = reporter.run_once(self.follower, runner=runner)
         self.assertEqual(result.sent, 1)
         self.assertEqual(result.banned, 0)
-        self.assertEqual(runner.calls, [])
+        self.assertEqual(runner.calls, [])  # no fail2ban-client call at all
 
     def test_missing_secret_reports_a_reason(self):
         self._enqueue()
