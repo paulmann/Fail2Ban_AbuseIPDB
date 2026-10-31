@@ -19,6 +19,11 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg.min_interval_ip, 1200)
         self.assertIn("recidive", cfg.skip_jails)
         self.assertTrue(cfg.ignore_ranges)
+        self.assertEqual(cfg.daily_budget_timezone, "utc")
+        self.assertEqual(cfg.request_delay, 1.0)
+        self.assertEqual(cfg.retry_after_cap, 60)
+        self.assertEqual(cfg.status_path, config_module.DEFAULT_STATUS_PATH)
+        self.assertEqual(cfg.prometheus_textfile, "")
 
     def test_example_config_is_parsable(self):
         path = os.path.join(REPO_ROOT, "config", "reporter.conf.example")
@@ -71,6 +76,57 @@ class ConfigTests(unittest.TestCase):
             cfg = load_config(path)
         self.assertEqual(cfg.timeout, 25)
         self.assertEqual(cfg.max_reports_per_day, -5)
+
+    def test_rate_limit_and_status_options(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "reporter.conf")
+            status_path = os.path.join(tmp, "status.json")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "[abuseipdb]\ndaily_budget_timezone = LOCAL\nrequest_delay = 2.5\n"
+                    "retry_after_cap = 15\n"
+                    "[logging]\nstatus_path = %s\nprometheus_textfile = %s/prom\n"
+                    % (status_path, tmp)
+                )
+            cfg = load_config(path)
+        self.assertEqual(cfg.daily_budget_timezone, "local")
+        self.assertEqual(cfg.request_delay, 2.5)
+        self.assertEqual(cfg.retry_after_cap, 15)
+        self.assertEqual(cfg.status_path, status_path)
+        self.assertTrue(cfg.prometheus_textfile.endswith("prom"))
+
+    def test_status_file_can_be_disabled_with_an_empty_value(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "reporter.conf")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("[logging]\nstatus_path =\n")
+            cfg = load_config(path)
+        self.assertEqual(cfg.status_path, "")
+
+    def test_budget_timezone_aliases_and_garbage(self):
+        for raw, expected in (
+            ("utc", "utc"),
+            ("GMT", "utc"),
+            ("local", "local"),
+            ("server", "local"),
+            ("yesterday", "utc"),
+            ("", "utc"),
+        ):
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "reporter.conf")
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write("[abuseipdb]\ndaily_budget_timezone = %s\n" % raw)
+                cfg = load_config(path)
+            self.assertEqual(cfg.daily_budget_timezone, expected, raw)
+
+    def test_new_jail_categories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = load_config(os.path.join(tmp, "absent.conf"))
+        self.assertEqual(cfg.categories_for("dovecot"), [18])
+        self.assertEqual(cfg.categories_for("vsftpd"), [5, 18])
+        self.assertEqual(cfg.categories_for("postfix-sasl"), [18])
+        self.assertEqual(cfg.categories_for("nginx-badbots"), [19, 21])
+        self.assertEqual(cfg.categories_for("totally-unknown"), [21])
 
 
 if __name__ == "__main__":

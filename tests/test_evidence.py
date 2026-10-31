@@ -82,6 +82,61 @@ class EvidenceTests(TempDirTestCase):
         patterns, _, _ = evidence.classify("proftpd", lines)
         self.assertIn("FTP login with non-existent user", patterns)
 
+    def test_classify_vsftpd(self):
+        lines = [
+            "vsftpd[1]: pam_unix(vsftpd:auth): authentication failure; rhost=198.51.100.7",
+            "vsftpd[1]: FAIL LOGIN: Client \"198.51.100.7\"",
+        ]
+        patterns, _, _ = evidence.classify("vsftpd", lines)
+        self.assertIn("PAM authentication failures", patterns)
+        self.assertIn("FTP login failed", patterns)
+
+    def test_classify_postfix_sasl(self):
+        lines = [
+            "postfix/smtpd[1]: warning: unknown[198.51.100.7]: SASL LOGIN authentication failed: authentication failure",
+        ]
+        patterns, _, _ = evidence.classify("postfix-sasl", lines)
+        self.assertIn("SMTP AUTH failure (SASL)", patterns)
+
+    def test_classify_dovecot(self):
+        lines = [
+            "dovecot[1]: imap-login: Disconnected (auth failed, 1 attempts in 2 secs): user=<x>, method=PLAIN, rip=198.51.100.7",
+            "dovecot[1]: pop3-login: Aborted login (auth failed, 1 attempts): user=<y>, rip=198.51.100.7",
+        ]
+        patterns, _, _ = evidence.classify("dovecot", lines)
+        self.assertIn("IMAP/POP3 authentication failures", patterns)
+        self.assertIn("IMAP/POP3 authentication aborted", patterns)
+
+    def test_unknown_web_jail_still_yields_requests(self):
+        lines = [
+            '198.51.100.7 - - [02/Jan/2026:03:04:05 +0000] "GET /wp-login.php HTTP/1.1" 403 1',
+            '198.51.100.7 - - [02/Jan/2026:03:04:06 +0000] "GET /?id=1%20UNION%20SELECT%201 HTTP/1.1" 500 1',
+        ]
+        patterns, indicators, sqli = evidence.classify("my-custom-web-jail", lines)
+        self.assertTrue(sqli)
+        self.assertIn("SQL injection attempts", patterns)
+        self.assertEqual(indicators[0], "GET /wp-login.php -> 403")
+
+    def test_unknown_jail_without_requests_is_silent(self):
+        patterns, indicators, sqli = evidence.classify(
+            "some-service", ["some-service[1]: something happened"]
+        )
+        self.assertEqual((patterns, indicators, sqli), ([], [], False))
+
+    def test_apache_jail_is_treated_as_web(self):
+        self.assertTrue(evidence.is_web_jail("apache-badbots"))
+        self.assertTrue(evidence.is_web_jail("nginx-attack-scan"))
+        self.assertFalse(evidence.is_web_jail("sshd"))
+        self.assertFalse(evidence.is_web_jail(""))
+
+    def test_registry_is_ordered_and_extensible(self):
+        self.assertIs(evidence.classifier_for("sshd"), evidence._classify_sshd)
+        self.assertIs(evidence.classifier_for("dovecot"), evidence._classify_imap)
+        self.assertIs(evidence.classifier_for("unknown"), evidence._classify_generic)
+        prefixes = [prefix for group, _ in evidence.CLASSIFIERS for prefix in group]
+        self.assertIn("nginx", prefixes)
+        self.assertIn("postfix", prefixes)
+
 
 if __name__ == "__main__":
     unittest.main()

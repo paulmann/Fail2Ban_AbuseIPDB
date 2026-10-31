@@ -19,9 +19,22 @@ is the `ABUSEIPDB_REPORTER_CONFIG` environment variable.
 | `min_interval_ip` | `1200` | minimum seconds between two reports for the same IP (API allows one per 900 s) |
 | `max_reports_per_run` | `25` | cap per timer tick |
 | `max_reports_per_day` | `900` | daily budget; free AbuseIPDB plan allows 1000 requests/day |
+| `daily_budget_timezone` | `utc` | which midnight starts the budget day: `utc` (AbuseIPDB resets its quota at 00:00 UTC) or `local` |
+| `request_delay` | `1.0` | seconds between two API calls; doubles after each transient error |
+| `retry_after_cap` | `60` | upper bound for any pause, in seconds (also caps a `Retry-After` header) |
 | `comment_max_bytes` | `1000` | comment is truncated to this size (API hard limit 1024) |
 | `evidence_max_lines` | `4` | how many evidence lines/URLs to include |
 | `skip_jails` | `recidive` | comma separated jails that are never reported |
+
+## `[logging]`
+
+| Option | Default | Meaning |
+|---|---|---|
+| `path` | `/var/log/abuseipdb-reporter.log` | one line per event, per report and per error |
+| `status_path` | `/var/lib/abuseipdb/status.json` | machine-readable status of the last run; set it to an empty value to disable the file |
+| `prometheus_textfile` | *(empty)* | if set, the same numbers are written as a Prometheus text-exposition file for the `node_exporter` textfile collector |
+
+See [Monitoring](#monitoring-status-file-and-metrics) below.
 
 ## API key resolution
 
@@ -116,17 +129,45 @@ Maps a fail2ban jail to one or more AbuseIPDB category IDs
 | Jail | Categories | Meaning |
 |---|---|---|
 | `sshd` | 18,22 | Brute-Force, SSH |
-| `proftpd` | 18,5 | Brute-Force, FTP Brute-Force |
+| `proftpd`, `vsftpd`, `pure-ftpd` | 18,5 | Brute-Force, FTP Brute-Force |
 | `exim-auth-fail` | 18 | Brute-Force |
 | `exim-isp` | 18,11 | Brute-Force, Email Spam |
+| `postfix`, `postfix-sasl` | 18 | Brute-Force |
+| `dovecot` | 18 | Brute-Force |
 | `nginx-attack-scan` | 21,19 | Web App Attack, Bad Web Bot |
 | `nginx-wp-login` | 21,18 | Web App Attack, Brute-Force |
 | `nginx-php-probe` | 21,15 | Web App Attack, Hacking |
 | `nginx-forbidden` | 21 | Web App Attack |
+| `nginx-badbots`, `nginx-botsearch` | 19,21 | Bad Web Bot, Web App Attack |
+| `nginx-noscript` | 21,15 | Web App Attack, Hacking |
+| `apache-auth` | 18 | Brute-Force |
+| `apache-badbots` | 19,21 | Bad Web Bot, Web App Attack |
 
 SQL-injection attempts are detected automatically (patterns such as
 `UNION SELECT`, `information_schema`, `OR 1=1`, `sleep(`, `load_file(`) and
-category **16** is added to the report.
+category **16** is added to the report. Percent-encoded payloads
+(`%20UNION%20SELECT`) are matched too, because the line is also checked after
+URL-decoding.
+
+### Evidence classifiers
+
+Log lines are turned into report text by a **registry** of classifiers
+(`src/abuseipdb_reporter/evidence.py`, `CLASSIFIERS`), matched by jail-name
+prefix:
+
+| Prefixes | Classifier | Output |
+|---|---|---|
+| `sshd`, `ssh-`, `dropbear` | SSH | password/root/PAM patterns, MaxAuthTries |
+| `proftpd`, `vsftpd`, `pure-ftpd` | FTP | non-existent user, wrong password, PAM failures |
+| `exim`, `postfix`, `sendmail`, `smtpd` | SMTP | AUTH codes 535/435, SASL failures |
+| `dovecot`, `courier`, `cyrus` | mailbox | aborted/failed IMAP and POP3 logins |
+| `nginx`, `apache`, `haproxy`, `lighttpd`, `openresty`, `traefik` | web | request line + status, SQLi flag |
+| anything else | generic | request lines and SQLi flag when the lines carry them |
+
+Add support for another service by appending one `((prefix, ...), function)`
+pair to `CLASSIFIERS` - the reporter and the comment builder stay untouched.
+Until then an unknown jail still gets the generic treatment instead of an empty
+report.
 
 Add your own jails without touching code:
 
@@ -183,15 +224,75 @@ AbuseIPDB limits the free plan to **1000 reports + checks per day** and accepts
 * `min_interval_ip` = 1200 s (20 minutes) between reports for the same IP;
 * `max_reports_per_day` = 900, leaving headroom for `--check-key`;
 * `max_reports_per_run` = 25, keeping each timer tick short;
-* on HTTP 429 the run stops (or the IP is deferred), and the events stay queued.
+* on HTTP 429 the run stops (global limit) or the IP is deferred (per-IP limit),
+  and the events stay queued.
+
+The worker also reacts to what the API says:
+
+* a `Retry-After` header (delta-seconds or HTTP-date) sets the pause before the
+  next call, capped by `retry_after_cap`;
+* each consecutive transient failure (5xx, transport error, 429) doubles the
+  pause from `request_delay`, up to the same cap, so a struggling API is not
+  hammered; one success resets it;
+* the daily budget starts at **00:00 UTC** by default, which is when AbuseIPDB
+  resets the account quota. `daily_budget_timezone = local` restores counting
+  from the host's own midnight.
 
 `--check-key` uses one `/check` request; do not run it in a loop.
+
+## Monitoring: status file and metrics
+
+Every run (except `--dry-run`) rewrites
+`/var/lib/abuseipdb/status.json` atomically, so the answer to "is it working?"
+needs no log parsing:
+
+```bash
+abuseipdb-report --status
+```
+
+```json
+{
+  "budget_timezone": "utc",
+  "errors": 0,
+  "iso": "2026-10-31T19:20:00+00:00",
+  "max_per_day": 900,
+  "pending": 3,
+  "retry_after": 0,
+  "sent": 2,
+  "skipped": 0,
+  "stopped": "",
+  "today": 42,
+  "ts": 1767260400,
+  "version": "1.2.0",
+  "waited_seconds": 2.0
+}
+```
+
+With `prometheus_textfile` set, the same numbers are exported for the
+`node_exporter` textfile collector:
+
+```
+abuseipdb_reporter_pending_events 3
+abuseipdb_reporter_reports_today 42
+abuseipdb_reporter_sent_last_run 2
+abuseipdb_reporter_skipped_last_run 0
+abuseipdb_reporter_errors_last_run 0
+abuseipdb_reporter_run_timestamp_seconds 1767260400
+abuseipdb_reporter_run_ok 1
+abuseipdb_reporter_budget_remaining 858
+abuseipdb_reporter_info{version="1.2.0",stopped="",budget_timezone="utc"} 1
+```
+
+Writing status is best effort: an unwritable directory is logged and never turns
+a successful run into a failed one. A dry run never overwrites the status of the
+last real run.
 
 ## Environment variables
 
 | Variable | Meaning |
 |---|---|
-| `ABUSEIPDB_API_KEY` | key for the installer (`--api-key` alternative) |
+| `ABUSEIPDB_API_KEY`, `ABUSEIPDB_KEY` | key for the installer and for the reporter (`--api-key` alternative) |
+| `ABUSEIPDB_KEY_FILE` | alternative path to the key file |
 | `ABUSEIPDB_REPORTER_CONFIG` | config path used by the CLI when `--config` is omitted |
 
 ## Applying changes

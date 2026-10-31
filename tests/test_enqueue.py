@@ -1,5 +1,7 @@
 """Ban queueing tests."""
+import sqlite3
 import unittest
+from unittest import mock
 
 import tests  # noqa: F401
 from abuseipdb_reporter import db, enqueue
@@ -48,6 +50,37 @@ class EnqueueTests(TempDirTestCase):
             conn.close()
         self.assertEqual(rows[0]["n"], 1)
         self.assertEqual(rows[0]["failures"], 9)
+
+    def test_locked_queue_is_retried_with_backoff(self):
+        locked = sqlite3.OperationalError("database is locked")
+        with mock.patch.object(
+            enqueue.db, "enqueue", side_effect=[locked, locked, True]
+        ) as write, mock.patch("time.sleep") as sleep:
+            self.assertTrue(enqueue.enqueue_ban(self.cfg, "8.8.8.8", "sshd", failures=4))
+        self.assertEqual(write.call_count, 3)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [0.2, 0.4])
+
+    def test_locked_queue_gives_up_without_raising(self):
+        locked = sqlite3.OperationalError("database is locked")
+        with mock.patch.object(enqueue.db, "enqueue", side_effect=locked) as write, mock.patch(
+            "time.sleep"
+        ) as sleep:
+            self.assertFalse(enqueue.enqueue_ban(self.cfg, "8.8.8.8", "sshd"))
+        self.assertEqual(write.call_count, enqueue.ENQUEUE_RETRIES)
+        self.assertEqual(len(sleep.call_args_list), enqueue.ENQUEUE_RETRIES - 1)
+
+    def test_non_lock_sqlite_error_is_not_retried(self):
+        broken = sqlite3.OperationalError("no such column: nope")
+        with mock.patch.object(enqueue.db, "enqueue", side_effect=broken) as write, mock.patch(
+            "time.sleep"
+        ) as sleep:
+            self.assertFalse(enqueue.enqueue_ban(self.cfg, "8.8.8.8", "sshd"))
+        self.assertEqual(write.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_store_reports_update_versus_insert(self):
+        self.assertTrue(enqueue.store(self.cfg, "8.8.8.8", "sshd", 60, 3))
+        self.assertFalse(enqueue.store(self.cfg, "8.8.8.8", "sshd", 60, 4))
 
 
 if __name__ == "__main__":

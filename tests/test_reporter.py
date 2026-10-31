@@ -1,9 +1,13 @@
 """Reporter worker tests (no network: the HTTP call is injected)."""
+import datetime
+import json
+import os
 import time
 import unittest
+from unittest import mock
 
 import tests  # noqa: F401
-from abuseipdb_reporter import db, reporter
+from abuseipdb_reporter import __version__, db, reporter, status
 from tests.helpers import TempDirTestCase, seed_fail2ban_db
 
 
@@ -159,6 +163,116 @@ class ReporterTests(TempDirTestCase):
         self.assertIn("GET /.env -> 404", payload["comment"])
         self.assertIn("18", payload["categories"])
         self.assertIn("21", payload["categories"])
+
+    def test_retry_after_pause_is_honoured(self):
+        self.enqueue(event_time=self.now - 60)
+        body_429 = '{"errors": [{"detail": "You can only report the same IP address once in 15 minutes."}]}'
+        http = FakeHttp((429, body_429, 7), (200, "{}"))
+        with mock.patch("time.sleep") as sleep:
+            result = reporter.run_once(self.cfg, now=self.now, http=http)
+        self.assertEqual(result.retry_after, 7)
+        self.assertEqual(result.waited, 7.0)
+        sleep.assert_called_once_with(7.0)
+
+    def test_transient_errors_back_off_exponentially(self):
+        self.cfg.request_delay = 1.0
+        self.cfg.retry_after_cap = 60
+        for last_octet in (7, 8, 9):
+            self.enqueue(ip="198.51.100.%d" % last_octet, event_time=self.now - 60)
+        http = FakeHttp((500, "boom"), (500, "boom"), (200, "{}"))
+        with mock.patch("time.sleep") as sleep:
+            result = reporter.run_once(self.cfg, now=self.now, http=http)
+        self.assertEqual(result.sent, 1)
+        self.assertEqual(result.errors, 2)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [2.0, 4.0, 1.0])
+        self.assertEqual(result.waited, 7.0)
+
+    def test_status_file_and_prometheus_are_written(self):
+        self.cfg.status_path = os.path.join(self.tmp, "status.json")
+        self.cfg.prometheus_textfile = os.path.join(self.tmp, "abuseipdb.prom")
+        self.enqueue(event_time=self.now - 60)
+        http = FakeHttp((200, "{}"))
+        reporter.run_once(self.cfg, now=self.now, http=http)
+        payload = status.read(self.cfg.status_path)
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["sent"], 1)
+        self.assertEqual(payload["pending"], 0)
+        self.assertEqual(payload["version"], __version__)
+        self.assertEqual(payload["budget_timezone"], "utc")
+        with open(self.cfg.prometheus_textfile, "r", encoding="utf-8") as handle:
+            text = handle.read()
+        self.assertIn("abuseipdb_reporter_pending_events 0", text)
+        self.assertIn('version="%s"' % __version__, text)
+
+    def test_status_is_written_when_the_budget_is_exhausted(self):
+        self.cfg.status_path = os.path.join(self.tmp, "status.json")
+        self.cfg.max_reports_per_day = 1
+        self.enqueue(event_time=self.now - 60)
+        http = FakeHttp((200, "{}"))
+        reporter.run_once(self.cfg, now=self.now, http=http)
+        self.enqueue(ip="198.51.100.8", event_time=self.now)
+        result = reporter.run_once(self.cfg, now=self.now + 5, http=http)
+        self.assertEqual(result.stopped_reason, "daily budget exhausted")
+        payload = status.read(self.cfg.status_path)
+        self.assertEqual(payload["stopped"], "daily budget exhausted")
+        self.assertEqual(payload["pending"], 1)
+
+    def test_dry_run_does_not_overwrite_status(self):
+        self.cfg.status_path = os.path.join(self.tmp, "status.json")
+        self.enqueue(event_time=self.now - 60)
+        http = FakeHttp()
+        reporter.run_once(self.cfg, now=self.now, http=http)
+        first = status.read(self.cfg.status_path)
+        reporter.run_once(self.cfg, now=self.now + 60, http=http, dry_run=True)
+        self.assertEqual(status.read(self.cfg.status_path), first)
+
+    def test_two_tuple_http_client_is_still_supported(self):
+        self.enqueue(event_time=self.now - 60)
+        http = FakeHttp((200, "{}"))  # a 1.1-era client returns (status, body)
+        result = reporter.run_once(self.cfg, now=self.now, http=http)
+        self.assertEqual(result.sent, 1)
+        self.assertEqual(result.retry_after, 0)
+
+
+class ScheduleTests(unittest.TestCase):
+    """Budget day alignment and adaptive delay (pure functions)."""
+
+    def test_day_start_utc(self):
+        moment = 1767227400  # 2026-01-01T00:30:00Z
+        start = reporter.day_start(moment, "utc")
+        self.assertEqual(
+            datetime.datetime.fromtimestamp(start, tz=datetime.timezone.utc).isoformat(),
+            "2026-01-01T00:00:00+00:00",
+        )
+        self.assertLessEqual(start, moment)
+        self.assertGreater(moment - start, 1700)
+
+    def test_day_start_local_uses_local_midnight(self):
+        moment = int(time.time())
+        start = reporter.day_start(moment, "local")
+        local = datetime.datetime.fromtimestamp(start)
+        self.assertEqual((local.hour, local.minute, local.second), (0, 0, 0))
+        self.assertEqual(start, reporter._midnight(moment))
+
+    def test_next_delay(self):
+        cfg = _DictConfig(request_delay=1.5, retry_after_cap=60)
+        self.assertEqual(reporter.next_delay(cfg), 1.5)
+        self.assertEqual(reporter.next_delay(cfg, streak=1), 3.0)
+        self.assertEqual(reporter.next_delay(cfg, streak=3), 12.0)
+        self.assertEqual(reporter.next_delay(cfg, streak=9), 60.0)  # capped
+        self.assertEqual(reporter.next_delay(cfg, streak=1, retry_after=5), 5.0)
+        self.assertEqual(reporter.next_delay(cfg, streak=1, retry_after=600), 60.0)
+        self.assertEqual(
+            reporter.next_delay(_DictConfig(request_delay=0.0, retry_after_cap=60)), 0.0
+        )
+
+
+class _DictConfig:
+    """Minimal stand-in for Config in the pure-function tests."""
+
+    def __init__(self, **values):
+        self.request_delay = values.get("request_delay", 1.0)
+        self.retry_after_cap = values.get("retry_after_cap", 60)
 
 
 if __name__ == "__main__":

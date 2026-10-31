@@ -1,9 +1,9 @@
-# AGENTS.md — Fail2Ban_AbuseIPDB 1.1.1
+# AGENTS.md — Fail2Ban_AbuseIPDB 1.2.0
 
 Agent-facing guide: how to install Fail2Ban_AbuseIPDB, run it, and report problems responsibly.
 Human documentation: [README.md](README.md), [docs/](docs/), [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki).
 
-> Verified against repository state on 2026-10-22. Version covered: 1.1.1 (tag `v1.1.1`, released 2026-10-20).
+> Verified against repository state on 2026-10-31. Version covered: 1.2.0 (tag `v1.2.0`, released 2026-10-31).
 
 ## 1. What it is
 
@@ -13,7 +13,7 @@ A fail2ban action that writes every new ban into a local SQLite queue, plus a sc
 |---|---|
 | Runtime / platform | Linux with systemd (recommended) or cron; Python 3.9+ (standard library only, no pip packages); Fail2Ban 0.10+ (tested with 1.1.0) |
 | Entry points | `install.sh` (installer), `/usr/local/sbin/abuseipdb-report` (worker), `/usr/local/sbin/abuseipdb-enqueue` (queue helper), `/usr/local/sbin/abuseipdb-upgrade` (self-updater) |
-| Writes to | `/usr/local/lib/abuseipdb_reporter/`, `/usr/local/sbin/abuseipdb-report`, `abuseipdb-enqueue`, `abuseipdb-upgrade`, `/etc/abuseipdb/reporter.conf` (600), `/etc/abuseipdb/.abuseipdb.key` (600), `/var/lib/abuseipdb/abuseipdb.sqlite3`, `/etc/fail2ban/action.d/abuseipdb-async.conf`, `/etc/fail2ban/jail.d/50-abuseipdb-reporter.local`, systemd units `abuseipdb-report.{service,timer}` or `/etc/cron.d/abuseipdb-reporter`, `/etc/logrotate.d/abuseipdb-reporter`, `/var/log/abuseipdb-reporter.log`, backups in `/var/backups/fail2ban-abuseipdb/pristine-<timestamp>/`, state in `/var/lib/fail2ban-abuseipdb/install-state` |
+| Writes to | `/usr/local/lib/abuseipdb_reporter/`, `/usr/local/sbin/abuseipdb-report`, `abuseipdb-enqueue`, `abuseipdb-upgrade`, `/etc/abuseipdb/reporter.conf` (600), `/etc/abuseipdb/.abuseipdb.key` (600), `/var/lib/abuseipdb/abuseipdb.sqlite3`, `/var/lib/abuseipdb/status.json` (last run status, atomic rewrite), optional Prometheus textfile, `/etc/fail2ban/action.d/abuseipdb-async.conf`, `/etc/fail2ban/jail.d/50-abuseipdb-reporter.local`, systemd units `abuseipdb-report.{service,timer}` or `/etc/cron.d/abuseipdb-reporter`, `/etc/logrotate.d/abuseipdb-reporter`, `/var/log/abuseipdb-reporter.log`, backups in `/var/backups/fail2ban-abuseipdb/pristine-<timestamp>/`, state in `/var/lib/fail2ban-abuseipdb/install-state` |
 | Network access | HTTPS to `api.abuseipdb.com` (`/api/v2/report`, `/api/v2/check`); `raw.githubusercontent.com` / `github.com` for `updater.json` and the release tarball |
 
 ## 2. Preconditions
@@ -34,10 +34,10 @@ If a check fails, stop and report; do not work around it silently.
 
 ### 3.1 From a release
 
-Releases verified with `gh release list -R paulmann/Fail2Ban_AbuseIPDB`: `v1.1.1` (latest), `v1.1.0`, `v1.0.0`. The v1.1.1 asset is `Fail2Ban_AbuseIPDB-1.1.1.tar.gz`, SHA-256 `4d612d52ff3be034cff0303d4d913ab5f9891c08be41157b9390f232facd77a3` (`updater.json`). The repository does not document a manual install from the downloaded archive; the documented consumer of that asset is `abuseipdb-upgrade` ([docs/UPDATE.md](docs/UPDATE.md)), which verifies the checksum before running the bundled `install.sh`. For a first install, pin the verified tag in a checkout:
+Releases verified with `gh release list -R paulmann/Fail2Ban_AbuseIPDB`: `v1.2.0` (latest), `v1.1.1`, `v1.1.0`, `v1.0.0`. The v1.2.0 asset is `Fail2Ban_AbuseIPDB-1.2.0.tar.gz`; its SHA-256 is authoritative in [`updater.json`](updater.json), which the updater verifies before running the bundled `install.sh` - never trust a checksum quoted in prose. The repository does not document a manual install from the downloaded archive; the documented consumer of that asset is `abuseipdb-upgrade` ([docs/UPDATE.md](docs/UPDATE.md)). For a first install, pin the verified tag in a checkout:
 
 ```bash
-git clone --branch v1.1.1 --depth 1 https://github.com/paulmann/Fail2Ban_AbuseIPDB.git
+git clone --branch v1.2.0 --depth 1 https://github.com/paulmann/Fail2Ban_AbuseIPDB.git
 cd Fail2Ban_AbuseIPDB
 sudo ./install.sh --api-key "$ABUSEIPDB_API_KEY" --jails "sshd"
 ```
@@ -90,6 +90,9 @@ enabled = yes
 min_interval_ip = 1200
 max_reports_per_run = 25
 max_reports_per_day = 900
+daily_budget_timezone = utc
+request_delay = 1.0
+retry_after_cap = 60
 skip_jails = recidive
 
 [database]
@@ -97,6 +100,11 @@ path = /var/lib/abuseipdb/abuseipdb.sqlite3
 fail2ban_db = /var/lib/fail2ban/fail2ban.sqlite3
 retention_days = 30
 max_attempts = 10
+
+[logging]
+path = /var/log/abuseipdb-reporter.log
+status_path = /var/lib/abuseipdb/status.json
+prometheus_textfile =
 
 [ignore]
 ranges = 10.0.0.0/8, 192.168.0.0/16, 127.0.0.0/8, 203.0.113.10/32, 2001:db8::/32
@@ -112,6 +120,7 @@ sshd = 18,22
 | Purpose | Command | Expected result |
 |---|---|---|
 | Inspect the queue | `/usr/local/sbin/abuseipdb-report --stats` | counters `pending events:`, `pending ips:`, `reports today:`, `reports total:`, recent reports |
+| Last run in one call | `--status` | JSON: `sent`, `skipped`, `errors`, `pending`, `today`, `stopped`, `retry_after`, `version`; exit 1 when no status file exists yet |
 | Preview payloads | `/usr/local/sbin/abuseipdb-report --dry-run` | one JSON object per report, no API call, no event marked reported (it still opens the queue DB and applies `retention_days` cleanup) |
 | Drain the queue now | `/usr/local/sbin/abuseipdb-report` | journal line `report: run done sent=... pending=...`; real POSTs to AbuseIPDB |
 | Check the key | `--check-key` | `HTTP 200`; uses one `/check` request, do not loop it |
@@ -151,7 +160,8 @@ The scheduler runs the worker every 16 minutes (systemd timer with `Persistent=t
 | HTTP 401 | key wrong or revoked | replace the key file (or `--setup`); the run stops and retries next tick |
 | HTTP 403 | egress blocked by proxy/firewall or provider policy | verify `api.abuseipdb.com:443` |
 | HTTP 429 `once in 15 minutes` | same IP already reported by this account | expected; event stays pending |
-| HTTP 429 other text | daily budget exhausted | wait for the next day or lower `max_reports_per_day` |
+| HTTP 429 other text | daily budget exhausted | wait for the next day or lower `max_reports_per_day`; the budget day starts at 00:00 UTC unless `daily_budget_timezone = local` |
+| `database is locked` in the log | action and worker collided on the queue | action retries 3 times (0.2 s, 0.4 s) then drops the event; check nothing holds the DB for minutes |
 | HTTP 400 / 422 | report rejected as invalid | event marked invalid (2), never retried; check `[ignore] ranges` |
 | `fail2ban-client -t` fails | generated jail snippet conflicts | installer aborts before restarting; restore from `/var/backups/fail2ban-abuseipdb/pristine-<timestamp>/` or remove `/etc/fail2ban/jail.d/50-abuseipdb-reporter.local` |
 | Empty systemd journal | host does not persist journald | use `/var/log/abuseipdb-reporter.log` as the source of truth |
@@ -161,9 +171,9 @@ The scheduler runs the worker every 16 minutes (systemd timer with `Persistent=t
 ## 8. Limits
 
 - Deployment is Linux-only (fail2ban action + systemd/cron); the Python package and test suite run on any platform, but Windows and macOS are not supported as deployment targets.
-- No pip, no virtualenv, no daemon: standard library only, so packaging constraints are Python 3.9 syntax and Fail2Ban 0.10+.
+- No pip, no virtualenv, no daemon: standard library only, so packaging constraints are Python 3.9 syntax and Fail2Ban 0.10+. `pyproject.toml` still describes a normal package (wheel and sdist are built by the release workflow), but installing from PyPI is not a documented deployment path - the supported paths are `install.sh` and `abuseipdb-upgrade`.
 - Proxy support for egress is not provided out of the box; `api_url`/`check_url` are the only documented overrides ([docs/INSTALL.md](docs/INSTALL.md)).
-- Rate caps are deliberate: 20 minutes per IP, 25 reports per run, 900 per day (AbuseIPDB free plan allows 1000 requests/day and one report per IP per 15 minutes).
+- Rate caps are deliberate: 20 minutes per IP, 25 reports per run, 900 per day (AbuseIPDB free plan allows 1000 requests/day and one report per IP per 15 minutes). The daily budget day starts at 00:00 UTC by default.
 - The optional weekly update check only reports availability; automatic installation is not provided.
 - AbuseIPDB comments are public; the attribution footer is on by default (`attribution = no` disables it).
 - Manual installation from the downloaded release archive is Not documented in this repository.
@@ -175,11 +185,12 @@ The scheduler runs the worker every 16 minutes (systemd timer with `Persistent=t
 - [docs/CONFIGURATION.md](docs/CONFIGURATION.md) - every configuration key, key resolution, rate limits, environment variables.
 - [docs/UPDATE.md](docs/UPDATE.md) - update manifest, `--check`/`--upgrade` semantics, rollback, weekly check.
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - diagnosis recipes used in section 7.
-- `install.sh` (`VERSION="1.1.1"`, `usage()`, exit paths), `config/reporter.conf.example`, `fail2ban/action.d/abuseipdb-async.conf`, `systemd/abuseipdb-report.{service,timer}`, `cron/abuseipdb-reporter`, `logrotate/abuseipdb-reporter` - host changes and defaults.
-- `src/abuseipdb_reporter/{cli,updater,keys,config,enqueue,reporter}.py`, `pyproject.toml`, `updater.json`, `CHANGELOG.md` - version 1.1.1, flags, exit codes, key resolution order, release asset and checksum.
+- `install.sh` (`VERSION="1.2.0"`, `usage()`, exit paths), `config/reporter.conf.example`, `fail2ban/action.d/abuseipdb-async.conf`, `systemd/abuseipdb-report.{service,timer}`, `cron/abuseipdb-reporter`, `logrotate/abuseipdb-reporter` - host changes and defaults.
+- `src/abuseipdb_reporter/{cli,updater,keys,config,enqueue,reporter,api,evidence,comments,db,status,log,iputil}.py`, `pyproject.toml`, `updater.json`, `CHANGELOG.md` - version 1.2.0, flags, exit codes, key resolution order, classifier registry, status document, release asset and checksum.
 - `.github/workflows/ci.yml` - Python 3.9-3.13 matrix, staged install/uninstall rehearsal.
-- Release facts verified with `gh release list -R paulmann/Fail2Ban_AbuseIPDB` and `gh release view v1.1.1 -R paulmann/Fail2Ban_AbuseIPDB`.
-- CLI help was obtained read-only on this Windows workstation with Python 3.14.7 (`python bin/abuseipdb-report --help`, `bin/abuseipdb-enqueue --help`, `bin/abuseipdb-upgrade --help`). The installer, systemd units and fail2ban integration were verified by reading the sources and CI configuration only - this machine has no Linux/fail2ban runtime, so they were not executed here.
+- `.github/workflows/release.yml` - tag-driven release: version-consistency gate, tests, `git archive` tarball, wheel and sdist, `gh release create`, checksum in the job summary.
+- Release facts verified with `gh release list -R paulmann/Fail2Ban_AbuseIPDB` and `gh release view v1.2.0 -R paulmann/Fail2Ban_AbuseIPDB`.
+- `--check-key` was measured live on this Windows workstation on 2026-10-31 against `api.abuseipdb.com` with an owner-supplied key: `HTTP 200` with an `/api/v2/check` payload (the key itself is not stored in this repository). The installer, systemd units and fail2ban integration were verified by reading the sources and CI configuration only - this machine has no Linux/fail2ban runtime, so they were not executed here.
 
 ---
 

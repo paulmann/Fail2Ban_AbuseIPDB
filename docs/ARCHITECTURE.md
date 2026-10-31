@@ -138,6 +138,43 @@ root. This project deliberately passes only `<ip>`, `<name>`, `<bantime>` and
 
 7. Delete finished events and old report rows older than `retention_days`.
 
+### Rate limiting and backoff
+
+The budget day starts at **00:00 UTC** by default (`daily_budget_timezone`),
+because that is when AbuseIPDB resets the account quota; counting from a local
+midnight could overshoot it for hours. `local` restores the old behaviour.
+
+Between calls the worker waits `request_delay` (1.0 s). Two mechanisms can
+stretch that pause, both capped by `retry_after_cap` (60 s):
+
+* a `Retry-After` header on a 429 response (delta-seconds or HTTP-date, parsed
+  by `api.parse_retry_after`);
+* exponential backoff - each consecutive transient failure (5xx, transport
+  error, 429) doubles the pause, one success resets it to `request_delay`.
+
+The total time spent waiting is reported as `waited_seconds` in the status file.
+
+### Evidence classifiers
+
+`evidence.CLASSIFIERS` is an ordered registry of `((prefix, ...), function)`
+pairs; `classifier_for(jail)` returns the first match and a generic fallback. A
+classifier receives cleaned log lines and returns
+`(patterns, indicators, sqli)`. This keeps the reporter and the comment builder
+independent of the service: adding `vsftpd`, `postfix`, `dovecot` or a custom
+jail is one registry entry plus one function. Web jails are described by
+`WEB_JAIL_PREFIXES`, which also decides where raw request lines may be
+published (web) and where they must not be (SSH/FTP/mail carry
+attacker-chosen usernames).
+
+### Status and metrics
+
+After every run (and on every early exit: disabled, missing key, exhausted
+budget) `status.record()` writes the run counters to `status_path` and, when
+configured, to `prometheus_textfile`. Both files are replaced atomically
+(temporary file + `os.replace`), so a monitoring scrape never sees a partial
+document. Writing is best effort: an unwritable directory is logged and the run
+still counts as successful. Dry runs skip it entirely.
+
 ## Scheduling
 
 * **systemd timer** (default): `OnBootSec=3min`, `OnUnitActiveSec=16min`,
@@ -157,8 +194,8 @@ from processing the same queue at once.
 |---|---|
 | AbuseIPDB is down | events stay queued; retried on later ticks |
 | API key revoked | 401, run stops, error in the log, queue intact |
-| daily quota exhausted | run stops until the next day (UTC/local midnight of the host) |
-| database locked | SQLite busy timeout (10 s) and WAL mode |
+| daily quota exhausted | run stops until the next budget day (00:00 UTC by default) |
+| database locked | SQLite busy timeout (10 s) and WAL mode; the enqueue path retries 3 times with backoff |
 | disk full | enqueue logs an error, the ban still works |
 | host reboot | queue is on disk; `Persistent=true` runs the missed tick |
 | fail2ban restart | `norestored = 1` prevents duplicate reports for restored bans |
@@ -168,5 +205,7 @@ from processing the same queue at once.
 * one Python process per timer tick, ~13 MB RSS, well under a second for a
   normal queue;
 * one SQLite file, a few hundred kilobytes;
+* one status JSON file (a few hundred bytes) and, optionally, one Prometheus
+  textfile;
 * one log file, rotated weekly;
 * no daemons and no extra services.

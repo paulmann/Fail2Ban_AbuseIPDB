@@ -71,6 +71,11 @@ fail2ban_db = $WORK/fail2ban.sqlite3
 [report]
 server_ip = 203.0.113.10
 
+[logging]
+path = $WORK/reporter.log
+status_path = $WORK/status.json
+prometheus_textfile = $WORK/abuseipdb.prom
+
 [ignore]
 ranges = 127.0.0.0/8
 
@@ -115,6 +120,30 @@ db = sqlite3.connect(os.path.join(work, "queue.sqlite3"))
 assert db.execute("SELECT COUNT(*) FROM events WHERE reported=0").fetchone()[0] == 0
 assert db.execute("SELECT COUNT(*) FROM reports WHERE status=200").fetchone()[0] == 1
 print("API call, report journal and queue state OK")
+PY
+
+echo "== status file, Prometheus textfile and --status agree"
+python3 - "$WORK" <<'PY'
+import json, os, subprocess, sys
+work = sys.argv[1]
+status_path = os.path.join(work, "status.json")
+with open(status_path, "r", encoding="utf-8") as handle:
+    payload = json.load(handle)
+assert payload["sent"] == 1, payload
+assert payload["pending"] == 0, payload
+assert payload["budget_timezone"] == "utc", payload
+assert payload["version"], payload
+with open(os.path.join(work, "abuseipdb.prom"), "r", encoding="utf-8") as handle:
+    metrics = handle.read()
+for name in ("pending_events", "reports_today", "sent_last_run", "run_ok", "run_timestamp_seconds"):
+    assert "abuseipdb_reporter_%s " % name in metrics, name
+out = subprocess.run(
+    [sys.executable, "bin/abuseipdb-report", "--config", os.path.join(work, "reporter.conf"), "--status"],
+    check=True, capture_output=True, text=True,
+).stdout
+printed = json.loads(out)
+assert printed["version"] == payload["version"], printed
+print("status.json, metrics and --status OK (version %s)" % payload["version"])
 PY
 
 echo "== failure modes (429 / 422 / 500-then-200)"

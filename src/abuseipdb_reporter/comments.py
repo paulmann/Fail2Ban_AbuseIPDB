@@ -12,12 +12,22 @@ from .config import Config
 JAIL_DESCRIPTIONS: Dict[str, str] = {
     "sshd": "SSH brute-force",
     "proftpd": "FTP brute-force",
+    "vsftpd": "FTP brute-force",
+    "pure-ftpd": "FTP brute-force",
     "exim-auth-fail": "SMTP AUTH brute-force",
     "exim-isp": "SMTP abuse",
+    "postfix": "SMTP AUTH brute-force",
+    "postfix-sasl": "SMTP AUTH brute-force",
+    "dovecot": "mailbox (IMAP/POP3) brute-force",
     "nginx-attack-scan": "web application vulnerability scanning/exploitation attempts",
     "nginx-wp-login": "WordPress login brute-force",
     "nginx-php-probe": "web shell probing (requests to non-existent PHP scripts)",
     "nginx-forbidden": "web application attack (requests blocked by server rules)",
+    "nginx-badbots": "bad web bot / scraper activity",
+    "nginx-botsearch": "web bot search for known vulnerable paths",
+    "nginx-noscript": "web attack against disabled script paths",
+    "apache-auth": "authentication brute-force against a protected web area",
+    "apache-badbots": "bad web bot / scraper activity",
 }
 
 
@@ -118,7 +128,7 @@ def build_comment(
         # Raw log lines are only used for web jails: they contain the attacker's
         # URLs, which are safe to publish.  SSH/FTP/mail lines can contain
         # attacker-chosen usernames, so for those only generic patterns are sent.
-        if jail.startswith("nginx") and lines and not jail_indicators:
+        if evidence.is_web_jail(jail) and lines and not jail_indicators:
             if len(lines) > len(fallback_lines):
                 fallback_lines = list(lines)
 

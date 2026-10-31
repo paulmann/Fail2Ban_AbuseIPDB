@@ -19,7 +19,7 @@ Fail2Ban knows **who** attacked and **why**. AbuseIPDB wants a short factual rep
 
 This project separates the two paths. The ban stays local and instant. A small SQLite queue stores what happened. A scheduled worker (systemd timer or cron, every 16 minutes) turns the queue into evidence-backed reports, respects AbuseIPDB rate limits, retries failures and never blocks the firewall. The API key lives in its own file, and `abuseipdb-upgrade` updates the installation from GitHub without losing the key, the configuration, the queue or the jail list.
 
-> **Documentation status.** Counts in this README were re-measured from the published tree on 2026-10-20 (v1.1.1): 88 tests, 13 source modules, 66 tracked files, 18 wiki pages. The operator-facing long-form documentation lives in the [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki); the design-level documents live under [`docs/`](docs/).
+> **Documentation status.** Counts in this README were re-measured from the working tree on 2026-10-31 (v1.2.0): 123 tests, 14 source modules, 74 tracked files, 18 wiki pages. The operator-facing long-form documentation lives in the [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki); the design-level documents live under [`docs/`](docs/).
 
 ---
 
@@ -116,24 +116,26 @@ The caveat that matters: the project does not ban better than fail2ban and does 
 | **First-run wizard** | If no key exists anywhere, an interactive run asks once, validates and saves it. Under systemd/cron it fails with a clear message instead of hanging. |
 | **Self-update** | `updater.json` on GitHub; `abuseipdb-upgrade --check` (exit 10 = update) and `--upgrade` verify SHA-256, extract safely, preserve the key file and run the installer. |
 | **Rate-limit aware** | 20 minutes per IP, 25 reports per run and 900/day by default — inside the free AbuseIPDB plan. |
-| **Observable** | `--stats`, `--dry-run`, `--check-key`, `--key-status`, structured journal, logrotate configuration. |
+| **Adaptive pauses** | `Retry-After` is honoured, and each consecutive transient failure doubles the pause between calls (capped by `retry_after_cap`). The daily budget starts at 00:00 UTC, when AbuseIPDB resets its quota. |
+| **Observable** | `--stats`, `--dry-run`, `--check-key`, `--key-status`, a machine-readable `status.json` (`--status`), optional Prometheus textfile, structured journal, logrotate configuration. |
 | **Safe installer** | Backs up every replaced file, runs `fail2ban-client -t` before restarting, keeps state for a clean uninstall, supports staging with `--root`. |
 | **Self-advertising footer** | Every report ends with a configurable attribution line; disable it with `attribution = no` or replace it with your own. |
-| **Tested and gated** | 88 unit/integration tests, shellcheck, staged install/uninstall, CI on Python 3.9-3.13. |
+| **Extensible classifiers** | Evidence per service through a registry (`sshd`, FTP, SMTP, mailbox, web, generic fallback): a new jail is one entry, not a patch of the core loop. |
+| **Tested and gated** | 123 unit/integration tests, shellcheck, staged install/uninstall, CI on Python 3.9-3.13, tag-driven release workflow. |
 
 ---
 
 ## By the numbers
 
-Measured from the published tree on 2026-10-20 (v1.1.1):
+Measured from the working tree on 2026-10-31 (v1.2.0):
 
 | Surface | Count | Measured from |
 |---|---|---|
-| Python package modules | **13** files · 1,562 lines | `src/abuseipdb_reporter/*.py` |
-| Tests | **88** passing (1 skipped on Windows only) | `python -m unittest discover -s tests -t .` |
-| Test code | 11 files · 1,182 lines | `tests/` |
-| Installer and shell tooling | 750 lines | `*.sh` |
-| Documentation pages | 8 | `docs/*.md` |
+| Python package modules | **14** files · 2,335 lines | `src/abuseipdb_reporter/*.py` |
+| Tests | **123** passing (1 skipped on Windows only) | `python -m unittest discover -s tests -t .` |
+| Test code | 14 files · 1,793 lines | `tests/` |
+| Installer and shell tooling | 826 lines | `*.sh` |
+| Documentation pages | 9 | `docs/*.md` |
 | Wiki pages | 18 | `Fail2Ban_AbuseIPDB.wiki` |
 | Tracked files | 66 | `git ls-files` |
 | Runtime dependencies | **0** | `pyproject.toml` (none) |
@@ -457,8 +459,16 @@ enabled = yes
 min_interval_ip = 1200        # seconds; AbuseIPDB requires at least 900
 max_reports_per_run = 25
 max_reports_per_day = 900     # free plan: 1000 reports + checks per day
+daily_budget_timezone = utc   # budget day starts when AbuseIPDB resets (00:00 UTC)
+request_delay = 1.0           # seconds between calls; doubles on each failure
+retry_after_cap = 60          # upper bound for any pause, incl. Retry-After
 comment_max_bytes = 1000      # API hard limit: 1024
 skip_jails = recidive
+
+[logging]
+path = /var/log/abuseipdb-reporter.log
+status_path = /var/lib/abuseipdb/status.json   # empty value disables the file
+prometheus_textfile =                          # e.g. /var/lib/node_exporter/textfile/abuseipdb.prom
 
 [database]
 path = /var/lib/abuseipdb/abuseipdb.sqlite3
@@ -483,11 +493,17 @@ ranges = 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8,
 [category_map]
 sshd = 18,22
 proftpd = 18,5
+vsftpd = 18,5
 exim-auth-fail = 18
+postfix = 18
+postfix-sasl = 18
+dovecot = 18
 nginx-attack-scan = 21,19
 nginx-wp-login = 21,18
 nginx-php-probe = 21,15
 nginx-forbidden = 21
+nginx-badbots = 19,21
+apache-badbots = 19,21
 ```
 
 The installer fills in `server_ip`, `hostname` and the policy for the selected jails; everything else has safe defaults.
@@ -497,15 +513,22 @@ The installer fills in `server_ip`, `hostname` and the policy for the selected j
 | Jail | Categories | AbuseIPDB meaning |
 |---|---|---|
 | `sshd` | `18,22` | Brute-Force, SSH |
-| `proftpd` | `18,5` | Brute-Force, FTP Brute-Force |
+| `proftpd`, `vsftpd`, `pure-ftpd` | `18,5` | Brute-Force, FTP Brute-Force |
 | `exim-auth-fail` | `18` | Brute-Force (SMTP AUTH) |
 | `exim-isp` | `18,11` | Brute-Force, Email Spam |
+| `postfix`, `postfix-sasl` | `18` | Brute-Force (SMTP AUTH) |
+| `dovecot` | `18` | Brute-Force (IMAP/POP3) |
 | `nginx-attack-scan` | `21,19` | Web App Attack, Bad Web Bot |
 | `nginx-wp-login` | `21,18` | Web App Attack, Brute-Force |
 | `nginx-php-probe` | `21,15` | Web App Attack, Hacking |
 | `nginx-forbidden` | `21` | Web App Attack |
+| `nginx-badbots`, `nginx-botsearch`, `apache-badbots` | `19,21` | Bad Web Bot, Web App Attack |
+| `nginx-noscript` | `21,15` | Web App Attack, Hacking |
+| `apache-auth` | `18` | Brute-Force |
 
-SQL injection in a requested URL adds category **16** automatically.
+SQL injection in a requested URL adds category **16** automatically, including
+percent-encoded payloads (`%20UNION%20SELECT`). Any jail not in the table falls
+back to category `21`.
 
 ### API key resolution
 
@@ -565,6 +588,7 @@ The attribution line is appended after truncation, so it is never cut off. Set `
 ```bash
 abuseipdb-report                 # drain the queue (the timer runs this)
 abuseipdb-report --stats         # queue and journal statistics
+abuseipdb-report --status        # JSON status of the last run
 abuseipdb-report --dry-run       # print payloads, send nothing
 abuseipdb-report --check-key     # validate the key (one /check request)
 abuseipdb-report --key-status    # where the key comes from, masked
@@ -645,11 +669,13 @@ Full prompts: [Wiki — Agent prompts](https://github.com/paulmann/Fail2Ban_Abus
 | fail2ban restart | restored bans are not re-queued (`norestored = 1`) |
 | host reboot | SQLite queue is durable; `Persistent=true` catches up the missed tick |
 | concurrent workers | `/run` lock: one worker at a time |
-| SQLite busy | WAL plus a 10-second busy timeout |
+| SQLite busy | WAL plus a 10-second busy timeout; the action retries 3 times (0.2 s, 0.4 s) before dropping the event |
+| API asks to slow down | `Retry-After` is honoured (capped by `retry_after_cap`); failures double the pause between calls |
+| is it working? | `/var/lib/abuseipdb/status.json` and `abuseipdb-report --status`; optional Prometheus textfile |
 | disk full | enqueue logs an error; the ban still happens |
 | updater download corrupted | SHA-256 mismatch aborts before extraction |
 
-AbuseIPDB free plan: **1000 reports + checks per day** and **one report per IP per 15 minutes**. The defaults (900/day, 20 min/IP) stay inside both limits. If you exceed them deliberately, 429 handling keeps the queue intact rather than dropping events.
+AbuseIPDB free plan: **1000 reports + checks per day** and **one report per IP per 15 minutes**. The defaults (900/day, 20 min/IP) stay inside both limits. If you exceed them deliberately, 429 handling keeps the queue intact rather than dropping events. The daily budget day starts at **00:00 UTC** (when AbuseIPDB resets the account quota); set `daily_budget_timezone = local` for your own midnight.
 
 ---
 
@@ -658,7 +684,7 @@ AbuseIPDB free plan: **1000 reports + checks per day** and **one report per IP p
 * **API key isolation.** The key lives only in `/etc/abuseipdb/.abuseipdb.key` (mode 600, root). It is not in the configuration, the code, the release archives or git (`*.key` is ignored), and it is never passed to fail2ban or written to logs. `--key-status` prints a masked form.
 * **No command injection.** The action interpolates only values generated by fail2ban (`<ip>`, `<name>`, `<bantime>`, `<failures>`). Log lines are read from fail2ban's SQLite database by the Python worker and sent as a form-encoded body; they never touch a shell. The stock `abuseipdb.conf` action does interpolate `<matches>`; this project deliberately does not.
 * **Privacy.** Reports contain the attacker's IP, jail, counters and (for web jails) the attacker's own request URLs. Attempted usernames, mail content and client domains are excluded.
-* **Least privilege.** The worker is a systemd oneshot service with `ProtectSystem=full`, `ProtectHome=true`, `NoNewPrivileges=true` and write access limited to the queue directory and `/var/log`.
+* **Least privilege.** The worker is a systemd oneshot service with `ProtectSystem=full`, `ProtectHome=true`, `NoNewPrivileges=true`, restricted address families and syscalls, an empty capability set, and write access limited to the queue directory, the log and `/run`.
 * **Ignore list.** Private, loopback, link-local, documentation and reserved ranges are never reported; add your management networks and CDN ranges.
 * **Update integrity.** The updater requires a SHA-256 from `updater.json`, refuses archives without one, rejects absolute paths, traversal, symlinks and devices, snapshots the key file and restores it on failure. The optional weekly check only reads the manifest; it never installs automatically.
 
@@ -691,7 +717,7 @@ Windows and macOS are not supported for deployment (the fail2ban action and the 
 | [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki) | 18 pages: why, getting started, architecture, configuration, keys, self-update, report anatomy, Fail2Ban fundamentals, web protection, SSH/mail/FTP, verification and rollback, three agent-prompt collections, troubleshooting, FAQ, development |
 | [`docs/INSTALL.md`](docs/INSTALL.md) | installation reference, options, verification, upgrade, uninstall |
 | [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) | every option, key resolution, categories, ignore ranges |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | ban path, report path, queue schema, evidence, key file, updater |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | ban path, report path, queue schema, evidence, classifiers, status file, key file, updater |
 | [`docs/UPDATE.md`](docs/UPDATE.md) | manifest format, self-update steps, safety rules, rollback |
 | [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | diagnosis → action → verification recipes |
 | [`CHANGELOG.md`](CHANGELOG.md) | release history |
@@ -704,7 +730,7 @@ Start with [Wiki — Getting Started](https://github.com/paulmann/Fail2Ban_Abuse
 ## Development
 
 ```bash
-# 88 unit tests (Python 3.9+, no network, no root)
+# 123 unit tests (Python 3.9+, no network, no root)
 python -m unittest discover -s tests -t .
 
 # end-to-end test: real worker + queue + mock AbuseIPDB API (no external calls)
@@ -723,7 +749,7 @@ CI runs the unit suite on **Python 3.9-3.13**, the mock-API integration test, sh
 
 Project rules: standard library only, Python 3.9-compatible syntax, no secrets in the repository, no attacker-controlled text in shell commands, a SHA-256 requirement for updates, `fail2ban-client -t` before restarts, and a test for every behaviour change. Details: [CONTRIBUTING.md](CONTRIBUTING.md) and [Wiki — Development and Testing](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki/17-Development-and-Testing).
 
-Release process: bump `__version__` in `__init__.py`, `cli.py`, `pyproject.toml`, `install.sh` and the README badge; add a changelog section and release notes; build the archive; compute its SHA-256; write version, URL and checksum into `updater.json`; tag, publish, upload the asset; verify the asset hash against the manifest. A release is only published after all CI gates are green.
+Release process: bump `__version__` in `src/abuseipdb_reporter/__init__.py` (the single source; `cli.py` re-exports it), `pyproject.toml`, `install.sh` and the README counts; add a changelog section and `docs/release-notes-<version>.md`; commit and push; push a `v<version>` tag. The `Release` workflow then verifies version consistency, runs the tests, builds the installer tarball, the wheel and the sdist, and publishes the release with a checksum in the job summary. Write that checksum, URL and version into `updater.json` on `main` afterwards - that is what `abuseipdb-upgrade --check` reads. A release is only published after all CI gates are green.
 
 ---
 

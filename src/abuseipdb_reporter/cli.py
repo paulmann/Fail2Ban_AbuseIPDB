@@ -8,10 +8,8 @@ import sys
 import tempfile
 from typing import List, Optional
 
-from . import api, db, enqueue, keys, log, reporter
+from . import __version__, api, db, enqueue, keys, log, reporter, status
 from .config import Config, load_config
-
-__version__ = "1.1.1"
 
 #: Lock locations tried in order; the first writable one wins.  ``/run`` is the
 #: normal place for a system service, the fallbacks keep the tool usable by an
@@ -58,18 +56,13 @@ def acquire_lock(paths=None):
 
 
 def _stats_text(cfg: Config) -> str:
-    import datetime
     import sqlite3
     import time
 
     conn = db.connect(cfg.db_path)
     try:
         now = int(time.time())
-        midnight = int(
-            datetime.datetime.fromtimestamp(now)
-            .replace(hour=0, minute=0, second=0, microsecond=0)
-            .timestamp()
-        )
+        midnight = reporter.day_start(now, getattr(cfg, "daily_budget_timezone", "utc"))
         lines = ["db: %s" % cfg.db_path]
         for label, query, args in (
             ("pending events", "SELECT COUNT(*) FROM events WHERE reported=0", ()),
@@ -126,11 +119,11 @@ def _check_key(cfg: Config, no_prompt: bool = False) -> int:
         return 2
     api_cfg = cfg
     api_cfg.api_key = key
-    status, body = api.check_key(api_cfg)
+    status_code, body, _retry_after = api.check_key(api_cfg)
     print("key source: %s" % source)
-    print("HTTP %s" % status)
+    print("HTTP %s" % status_code)
     print(body[:500])
-    return 0 if status == 200 else 1
+    return 0 if status_code == 200 else 1
 
 
 def _resolve_key_for_run(cfg: Config, cli_key: Optional[str], no_prompt: bool) -> Optional[str]:
@@ -164,6 +157,11 @@ def main_report(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument("--key-status", action="store_true", help="show the API key source")
     parser.add_argument(
+        "--status",
+        action="store_true",
+        help="print the machine-readable status of the last run (JSON)",
+    )
+    parser.add_argument(
         "--no-prompt",
         action="store_true",
         help="never ask for the key interactively (for systemd/cron)",
@@ -195,6 +193,14 @@ def main_report(argv: Optional[List[str]] = None) -> int:
 
     if args.key_status:
         print(_key_status(cfg))
+        return 0
+
+    if args.status:
+        payload = status.read(cfg.status_path)
+        if payload is None:
+            print("no status file at %s (run the reporter at least once)" % (cfg.status_path or "-"))
+            return 1
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2))
         return 0
 
     if args.stats:

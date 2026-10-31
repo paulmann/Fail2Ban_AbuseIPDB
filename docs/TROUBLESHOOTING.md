@@ -75,6 +75,42 @@ is restored if it was touched).
   reported by this account. The event stays pending and is retried later.
 * Anything else - the daily limit (1000 on the free plan) is exhausted. The run
   stops; reduce `max_reports_per_day` or wait for the next day.
+* A `Retry-After` header is honoured: the worker waits that long (at most
+  `retry_after_cap`, 60 s by default) instead of the normal `request_delay`.
+  The value is recorded as `retry_after` in the status file.
+
+## Is it working? Ask the status file
+
+```bash
+abuseipdb-report --status          # {"sent": 2, "pending": 3, "today": 42, ...}
+```
+
+* `no status file at ...` - the worker has not completed a run yet (or
+  `status_path` is empty in `[logging]`); run it once by hand;
+* `stopped` names the reason the last run ended early: `disabled`,
+  `missing api key`, `daily budget exhausted`, `run budget exhausted`,
+  `global rate limit`, `unauthorized`;
+* `pending` is the number of queued events. A growing number with `sent: 0` and
+  an empty `stopped` field means the API answered but nothing was accepted -
+  look at the log for the per-IP `429` lines;
+* `retry_after` / `waited_seconds` show how much the API asked the worker to
+  pause.
+
+For Prometheus, set `prometheus_textfile` in `[logging]` and point the
+`node_exporter` textfile collector at that directory:
+
+```
+abuseipdb_reporter_pending_events 3
+abuseipdb_reporter_reports_today 42
+abuseipdb_reporter_run_ok 1
+```
+
+## The daily budget resets at an unexpected hour
+
+The budget day starts at **00:00 UTC** by default, because AbuseIPDB resets the
+account quota then. If the reports stop at an hour that does not match your
+evening, that is the reason - switch to your own midnight with
+`daily_budget_timezone = local` in `[abuseipdb]`.
 
 ## HTTP 400 / 422
 
@@ -84,8 +120,12 @@ malformed value). The event is marked `2` (invalid) and is never retried. Check
 
 ## The queue grows and does not drain
 
-* `stopped_reason` in the log (`daily budget exhausted`, `global rate limit`,
-  `unauthorized`) names the cause;
+* `abuseipdb-report --status` first: `stopped` names the cause
+  (`daily budget exhausted`, `global rate limit`, `unauthorized`);
+* `database is locked` in the log means the fail2ban action and the worker
+  collided; the action now retries three times (0.2 s, 0.4 s) and only drops the
+  event if the queue stays locked, while the worker holds it for at most a few
+  seconds per call;
 * an abuse burst (hundreds of unique addresses in minutes) is normal for a busy
   server: 25 reports per tick and 900 per day are the configured ceilings. The
   queue keeps every event and drains over time; nothing is lost.

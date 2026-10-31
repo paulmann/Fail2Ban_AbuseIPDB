@@ -12,6 +12,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+from .status import DEFAULT_STATUS_PATH
+
 DEFAULT_CONFIG_PATH = "/etc/abuseipdb/reporter.conf"
 DEFAULT_LOG_PATH = "/var/log/abuseipdb-reporter.log"
 DEFAULT_DB_PATH = "/var/lib/abuseipdb/abuseipdb.sqlite3"
@@ -34,13 +36,28 @@ DEFAULT_ATTRIBUTION = (
 DEFAULT_CATEGORY_MAP: Dict[str, str] = {
     "sshd": "18,22",
     "proftpd": "18,5",
+    "vsftpd": "18,5",
+    "pure-ftpd": "18,5",
     "exim-auth-fail": "18",
     "exim-isp": "18,11",
+    "postfix": "18",
+    "postfix-sasl": "18",
+    "dovecot": "18",
     "nginx-attack-scan": "21,19",
     "nginx-wp-login": "21,18",
     "nginx-php-probe": "21,15",
     "nginx-forbidden": "21",
+    "nginx-badbots": "19,21",
+    "nginx-botsearch": "19,21",
+    "nginx-noscript": "21,15",
+    "apache-auth": "18",
+    "apache-badbots": "19,21",
 }
+
+#: How the daily report budget is aligned.  AbuseIPDB resets its quota at
+#: 00:00 UTC, so ``utc`` is the safe default; ``local`` keeps the old
+#: behaviour for hosts whose operator prefers their own midnight.
+BUDGET_TIMEZONES = ("utc", "local")
 
 #: Ranges that must never be reported: our own/trusted hosts, private,
 #: loopback, reserved and documentation networks.
@@ -63,6 +80,25 @@ def _as_int(value, default: int) -> int:
         return int(str(value).strip())
     except (TypeError, ValueError):
         return default
+
+
+def _as_float(value, default: float) -> float:
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_timezone(value, default: str = "utc") -> str:
+    """Normalise ``daily_budget_timezone``; an unknown value falls back."""
+    text = str(value or "").strip().lower()
+    if text in BUDGET_TIMEZONES:
+        return text
+    if text in ("gmt", "z", "universal"):
+        return "utc"
+    if text in ("server", "system", "localtime"):
+        return "local"
+    return default
 
 
 def parse_ranges(raw: str) -> Tuple[ipaddress._BaseNetwork, ...]:
@@ -93,6 +129,9 @@ class Config:
     min_interval_ip: int = 1200
     max_reports_per_run: int = 25
     max_reports_per_day: int = 900
+    daily_budget_timezone: str = "utc"
+    request_delay: float = 1.0
+    retry_after_cap: int = 60
     comment_max_bytes: int = 1000
     evidence_max_lines: int = 4
     skip_jails: Tuple[str, ...] = ("recidive",)
@@ -105,6 +144,11 @@ class Config:
     attribution: bool = True
     attribution_text: str = DEFAULT_ATTRIBUTION
     log_path: str = DEFAULT_LOG_PATH
+    #: Empty by default: a directly constructed Config (tests, embedders) must
+    #: not write files outside its own directory.  ``load_config`` fills the
+    #: default path from ``[logging] status_path``.
+    status_path: str = ""
+    prometheus_textfile: str = ""
     update_manifest_url: str = DEFAULT_UPDATE_MANIFEST_URL
     ignore_ranges: Tuple[ipaddress._BaseNetwork, ...] = ()
     category_map: Dict[str, str] = field(default_factory=dict)
@@ -163,6 +207,9 @@ def load_config(path: Optional[str] = None, quiet: bool = False) -> Config:
         min_interval_ip=_as_int(get("abuseipdb", "min_interval_ip", "1200"), 1200),
         max_reports_per_run=_as_int(get("abuseipdb", "max_reports_per_run", "25"), 25),
         max_reports_per_day=_as_int(get("abuseipdb", "max_reports_per_day", "900"), 900),
+        daily_budget_timezone=_as_timezone(get("abuseipdb", "daily_budget_timezone", "utc")),
+        request_delay=max(0.0, _as_float(get("abuseipdb", "request_delay", "1.0"), 1.0)),
+        retry_after_cap=max(1, _as_int(get("abuseipdb", "retry_after_cap", "60"), 60)),
         comment_max_bytes=_as_int(get("abuseipdb", "comment_max_bytes", "1000"), 1000),
         evidence_max_lines=_as_int(get("abuseipdb", "evidence_max_lines", "4"), 4),
         skip_jails=skip,
@@ -177,6 +224,8 @@ def load_config(path: Optional[str] = None, quiet: bool = False) -> Config:
         attribution_text=get("report", "attribution_text", DEFAULT_ATTRIBUTION).strip()
         or DEFAULT_ATTRIBUTION,
         log_path=get("logging", "path", DEFAULT_LOG_PATH).strip() or DEFAULT_LOG_PATH,
+        status_path=get("logging", "status_path", DEFAULT_STATUS_PATH).strip(),
+        prometheus_textfile=get("logging", "prometheus_textfile", "").strip(),
         ignore_ranges=parse_ranges(ranges_raw),
         category_map=category_map,
         quiet=quiet,

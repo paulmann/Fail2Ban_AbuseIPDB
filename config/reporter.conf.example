@@ -32,6 +32,17 @@ min_interval_ip = 1200
 max_reports_per_run = 25
 max_reports_per_day = 900
 
+# Which midnight starts the budget day.  AbuseIPDB resets its quota at 00:00 UTC,
+# so "utc" (the default) never overshoots it.  "local" counts from the host's
+# own midnight, which used to be the only behaviour.
+daily_budget_timezone = utc
+
+# Seconds between two API calls.  After each transient failure the pause doubles
+# (exponential backoff) up to retry_after_cap, which also caps a Retry-After
+# header sent by the API.
+request_delay = 1.0
+retry_after_cap = 60
+
 # Comment is truncated to this many bytes (AbuseIPDB hard limit: 1024).
 comment_max_bytes = 1000
 evidence_max_lines = 4
@@ -70,6 +81,18 @@ attribution_text = Reported via Fail2Ban_AbuseIPDB Monitor: https://github.com/p
 # Manifest used by `abuseipdb-upgrade --check/--upgrade`.
 manifest_url = https://raw.githubusercontent.com/paulmann/Fail2Ban_AbuseIPDB/main/updater.json
 
+[logging]
+# One line per event; the source of truth on hosts without a persistent journal.
+path = /var/log/abuseipdb-reporter.log
+
+# Machine-readable status of the last run, rewritten atomically after every run.
+# `abuseipdb-report --status` prints it.  An empty value disables the file.
+status_path = /var/lib/abuseipdb/status.json
+
+# Optional Prometheus text-exposition file for the node_exporter textfile
+# collector.  Empty means "do not write metrics".
+prometheus_textfile =
+
 [ignore]
 # Never report these addresses: our own and trusted hosts, private, loopback,
 # reserved, documentation networks and CDN ranges that proxy other people's
@@ -92,9 +115,19 @@ ranges = 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16,
 # SQL-injection attempts are detected automatically and category 16 is added.
 sshd = 18,22
 proftpd = 18,5
+vsftpd = 18,5
+pure-ftpd = 18,5
 exim-auth-fail = 18
 exim-isp = 18,11
+postfix = 18
+postfix-sasl = 18
+dovecot = 18
 nginx-attack-scan = 21,19
 nginx-wp-login = 21,18
 nginx-php-probe = 21,15
 nginx-forbidden = 21
+nginx-badbots = 19,21
+nginx-botsearch = 19,21
+nginx-noscript = 21,15
+apache-auth = 18
+apache-badbots = 19,21

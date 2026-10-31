@@ -4,6 +4,48 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-10-31
+
+### Added
+
+* **Status file and metrics**: every run rewrites
+  `/var/lib/abuseipdb/status.json` atomically (counters, budget, stop reason,
+  version), `abuseipdb-report --status` prints it, and `prometheus_textfile`
+  exports the same numbers for the node_exporter textfile collector. A dry run
+  never overwrites the status of the last real run; an unwritable path is logged
+  and does not fail the run.
+* **`Retry-After` support**: a 429 response is parsed (delta-seconds and
+  HTTP-date) and the pause before the next call follows it, capped by
+  `retry_after_cap`.
+* **Adaptive backoff**: `request_delay` (1.0 s) between calls, doubled for each
+  consecutive transient failure up to the cap and reset by one success.
+* **UTC-aligned daily budget** (`daily_budget_timezone`, default `utc`): the
+  budget day starts when AbuseIPDB resets its quota; `local` keeps the old
+  behaviour.
+* **Classifier registry** in `evidence.py` with support for `vsftpd`,
+  `pure-ftpd`, `postfix`, `postfix-sasl`, `dovecot`, `courier`, `cyrus`,
+  `apache-*`, `haproxy`, `lighttpd`, `openresty`, `traefik` and a generic
+  fallback; new jails are added by appending one entry.
+* **Percent-encoded SQL injection** (`%20UNION%20SELECT`) is now detected: the
+  SQLi patterns also run against the URL-decoded line.
+* **Default categories** for the new jails (`vsftpd`, `postfix`, `dovecot`,
+  `nginx-badbots`, `nginx-botsearch`, `nginx-noscript`, `apache-auth`,
+  `apache-badbots`, ...).
+* **Queue lock retry**: a locked queue database is retried three times with a
+  short exponential backoff instead of dropping the ban event.
+* **Release workflow**: tag-driven build of the installer tarball, wheel and
+  sdist, with a version-consistency gate and a checksum in the job summary.
+* **Hardened systemd unit**: address-family and syscall restrictions, no
+  capabilities, `MemoryDenyWriteExecute`, `/run` added to `ReadWritePaths`.
+
+### Changed
+
+* `api.request()` returns `(status, body, retry_after)`; an injected client
+  that returns a two-tuple is still accepted and treated as "no Retry-After".
+* The package version lives only in `abuseipdb_reporter/__init__.py`;
+  `abuseipdb_reporter.cli` re-exports it.
+* Tests: **123** (was 88).
+
 ## [1.1.1] - 2026-10-20
 
 ### Fixed
@@ -84,3 +126,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 * CI: unit tests on Python 3.9-3.13, shellcheck, staged install/uninstall.
 
 [1.0.0]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.0.0
+[1.2.0]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.2.0
