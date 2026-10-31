@@ -77,7 +77,8 @@ jobs:
           asset="Fail2Ban_AbuseIPDB-$version.tar.gz"
           git archive --format=tar.gz --prefix="Fail2Ban_AbuseIPDB-$version/" \
             --output="$asset" "${{ steps.v.outputs.tag }}"
-          tar tzf "$asset" | head -5
+          # sed, not head: head closes the pipe and tar dies of SIGPIPE under pipefail
+          tar tzf "$asset" | sed -n '1,5p'
           sha256sum "$asset" | tee asset.sha256
 
       - name: Build wheel and sdist
