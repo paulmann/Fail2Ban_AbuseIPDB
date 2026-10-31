@@ -138,6 +138,24 @@ curl -s -H "X-Coord-Secret: $(sudo cat /etc/abuseipdb/.coord.secret)" \
 `abuseipdb-coord.service` is installed by `install.sh` but **never enabled**: an
 endpoint nobody asked for must not open a port.
 
+A reference firewall unit (keep it next to the endpoint, enabled only together
+with it):
+
+```ini
+[Unit]
+Description=Restrict the coordination port to known peers
+Before=abuseipdb-coord.service
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'iptables -C INPUT -i lo -p tcp --dport 8765 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -i lo -p tcp --dport 8765 -j ACCEPT; iptables -C INPUT -p tcp --dport 8765 -s 10.0.0.0/24 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport 8765 -s 10.0.0.0/24 -j ACCEPT; iptables -C INPUT -p tcp --dport 8765 -j DROP 2>/dev/null || iptables -A INPUT -p tcp --dport 8765 -j DROP'
+
+[Install]
+WantedBy=multi-user.target
+```
+
 ## Follower setup
 
 The follower needs `fail2ban-client` in `PATH` (it ships with fail2ban) and the
@@ -273,6 +291,11 @@ leader does not repeat a report the old one made two minutes ago.
   a firewall or systemd (`IPAddressAllow=`), or terminate TLS in front of it. A
   minimal workable setup: `coord_bind = 10.0.0.5` plus
   `iptables -A INPUT -p tcp --dport 8765 -s 10.0.0.0/24 -j ACCEPT`.
+* **A firewall that ends with `-j DROP` must accept loopback first.** Otherwise the
+  leader's own health check (`curl -H "X-Coord-Secret: ..." http://127.0.0.1:8765/v1/status`)
+  fails with `HTTP 000` while everything looks configured - measured on a live
+  host: the peers kept syncing, the local check did not. Order the rules as
+  loopback → each peer → DROP (see the unit in the next paragraph).
 * Requests larger than 1 MiB are rejected with 413 before the body is read; the
   per-request event count is capped at 5000.
 * **Ban propagation is a real power.** A compromised leader can make every
@@ -307,7 +330,8 @@ sqlite3 /var/lib/abuseipdb/abuseipdb.sqlite3 \
 | `follower (missing shared secret ...)` | file absent or unreadable | create it, mode 600 |
 | `follower (URLError ...)` | leader down, wrong port, firewall | `curl -H "X-Coord-Secret: ..." http://leader:8765/v1/status` |
 | `waiting for push` grows, leader `pending` stays 0 | follower points at the wrong leader | `--coord-status` on the follower |
-| `coord: remote ban not applied ... unable to find jail` | the jail does not exist on that node | add the jail there or narrow `to_ban` with `skip_jails` on the leader |
+| `coord: remote ban not applied ... unable to find jail` | the jail does not exist on that node (1.4.1 filters these out; a 1.4.0 follower still receives them) | upgrade the follower, or add the jail there |
+| local `curl` to `/v1/status` answers `HTTP 000` while peers sync fine | the port firewall ends with DROP and never accepts loopback | add `-i lo ... ACCEPT` before the DROP rule (see Security) |
 | `coord: remote ban cap reached` | more than `max_remote_bans_per_run` bans in one answer | normal after an attack burst; the rest arrives on later ticks |
 | reports stop with `already reported recently` in the log | the address is inside `peer_dedupe_window` | expected - the cluster already reported it |
 | Leader reports `unpushed` instead of `pending` | the leader itself is configured as a follower | set `mode = leader` |
