@@ -126,6 +126,36 @@ def coordination_round(work, leader_config, requests_path):
         with open(requests_path, "r", encoding="utf-8") as handle:
             total = [json.loads(line) for line in handle if line.strip()]
         assert len(total) == 3, "expected 3 API calls in total, got %d" % len(total)
+
+        # two-way payload: a ban from a third node must come back as to_ban,
+        # together with the addresses the leader already reported
+        leader_db = sqlite3.connect(os.path.join(work, "queue.sqlite3"))
+        now = int(time.time())
+        leader_db.execute(
+            "INSERT INTO events(ip, jail, event_time, created_at, origin) VALUES (?,?,?,?,?)",
+            ("198.51.100.99", "sshd", now - 5, now - 5, "mail-node"),
+        )
+        leader_db.commit()
+        leader_db.close()
+
+        sys.path.insert(0, os.path.join(REPO, "src"))
+        from abuseipdb_reporter import coordination  # noqa: E402
+
+        client = coordination.LeaderClient(
+            "http://127.0.0.1:%d" % coord_port,
+            open(secret_path, encoding="utf-8").read().strip(),
+        )
+        delivered, answer = client.sync("web-1", [], since=now - 600)
+        assert delivered, answer
+        banned_ips = [item["ip"] for item in answer["to_ban"]]
+        assert "198.51.100.99" in banned_ips, banned_ips
+        # a node never gets its own bans echoed back
+        assert not ({"198.51.100.20", "198.51.100.21"} & set(banned_ips)), banned_ips
+        assert "recently_reported" in answer and answer["next_since"] > 0, answer
+        print(
+            "sync payload OK: to_ban=%s recently_reported=%d next_since=%d"
+            % (banned_ips, len(answer["recently_reported"]), answer["next_since"])
+        )
         print(
             "coordination OK: follower pushed 2 events, leader reported them "
             "(3 API calls in total)"

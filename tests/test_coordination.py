@@ -202,7 +202,10 @@ class EndpointTests(TempDirTestCase):
         ]
         status, body = self._post("/v1/push", {"node_id": "web-1", "events": events})
         self.assertEqual(status, 200)
-        self.assertEqual(body, {"accepted": 2, "inserted": 2, "rejected": 0})
+        self.assertEqual(
+            {key: body[key] for key in ("accepted", "inserted", "rejected")},
+            {"accepted": 2, "inserted": 2, "rejected": 0},
+        )
         self.assertEqual(self._pending(), 2)
         conn = db.connect(self.cfg.db_path)
         try:

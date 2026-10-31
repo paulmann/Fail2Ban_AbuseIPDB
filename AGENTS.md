@@ -1,9 +1,9 @@
-# AGENTS.md — Fail2Ban_AbuseIPDB 1.3.0
+# AGENTS.md — Fail2Ban_AbuseIPDB 1.4.0
 
 Agent-facing guide: how to install Fail2Ban_AbuseIPDB, run it, and report problems responsibly.
 Human documentation: [README.md](README.md), [docs/](docs/), [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki).
 
-> Verified against repository state on 2026-10-31. Version covered: 1.3.0 (tag `v1.3.0`, released 2026-10-31).
+> Verified against repository state on 2026-11-01. Version covered: 1.4.0 (tag `v1.4.0`, released 2026-11-01).
 
 ## 1. What it is
 
@@ -114,6 +114,10 @@ shared_secret_file = /etc/abuseipdb/.coord.secret
 coord_bind = 127.0.0.1
 coord_port = 8765
 push_batch_size = 50
+sync_bans = yes
+max_remote_bans_per_run = 20
+peer_dedupe_window = 900
+max_sync_bans = 50
 
 [ignore]
 ranges = 10.0.0.0/8, 192.168.0.0/16, 127.0.0.0/8, 203.0.113.10/32, 2001:db8::/32
@@ -189,6 +193,7 @@ The scheduler runs the worker every 16 minutes (systemd timer with `Persistent=t
 - Proxy support for egress is not provided out of the box; `api_url`/`check_url` are the only documented overrides ([docs/INSTALL.md](docs/INSTALL.md)).
 - Rate caps are deliberate: 20 minutes per IP, 25 reports per run, 900 per day (AbuseIPDB free plan allows 1000 requests/day and one report per IP per 15 minutes). The daily budget day starts at 00:00 UTC by default.
 - Coordination supports **one leader**: there is no election and no shared lease, so failover is a manual procedure (move the key file, switch `mode`, restart the endpoint). Never run two leaders with the same key - that doubles the account budget consumption and breaks the per-IP interval between hosts.
+- **Ban propagation is opt-out and bounded**: a follower applies `to_ban` through `fail2ban-client` (ignore ranges, own `server_ip`, strict jail-name pattern, `max_remote_bans_per_run` = 20 per run, never unban). `sync_bans = no` disables it. The endpoint must never face the internet: a compromised leader can make followers ban addresses.
 - The optional weekly update check only reports availability; automatic installation is not provided.
 - AbuseIPDB comments are public; the attribution footer is on by default (`attribution = no` disables it).
 - Manual installation from the downloaded release archive is Not documented in this repository.

@@ -1,40 +1,50 @@
-"""Leader/follower coordination for one shared AbuseIPDB account.
+"""Leader/follower coordination: report deduplication and ban propagation.
 
-Why: AbuseIPDB limits are **per account**, not per host.  When several servers
-are protected by fail2ban but share one API key, each of them would drain its own
-queue and the account budget would be spent `n` times faster, with the per-IP
-interval violated between hosts.
+One AbuseIPDB account, several protected hosts.  The **leader** is the only node
+that talks to the API; the others push their ban events to it.  Every sync is a
+two-way exchange:
 
-With coordination enabled, exactly one node reports:
+```
+follower ──POST /v1/sync {node_id, events, since}──► leader
+         ◄──── {accepted, inserted, rejected,
+                recently_reported: {ip: ts},      # do not report these again
+                to_ban: [{ip, jail}],             # ban them here as well
+                next_since} ─────────────────────
+```
 
-* ``mode = leader``  - reports as usual **and** accepts events pushed by others;
-* ``mode = follower`` - never touches the API; it pushes its queued events to the
-  leader over a small authenticated HTTP endpoint and marks them delivered;
-* ``mode = none``    - the default: every node reports for itself (1.2.x
-  behaviour, fully backward compatible).
+* ``recently_reported`` keeps a node from reporting an address the cluster has
+  already reported inside the AbuseIPDB window - also right after a role change.
+* ``to_ban`` propagates a ban seen on one node to the others, so an attacker who
+  moves between hosts meets the same firewall everywhere.
+* ``since`` is the follower's cursor: the leader answers with the bans created
+  after it and never echoes a ban back to the node it came from.
 
-Design constraints, in order of importance:
+Roles: ``none`` (standalone, the default), ``leader`` (reports and serves
+``abuseipdb-coord``), ``follower`` (pushes, applies remote bans, never reports).
 
-* the ban path never blocks (a follower's push happens in the worker, not in the
-  fail2ban action);
-* the API key exists only on the leader - followers do not even need one;
-* no new dependencies: ``urllib`` on the client, ``http.server`` on the leader;
-* failover is manual by design: move the key, flip ``mode``, restart the timer.
-  There is no election, no shared lease and no hidden consensus.
+Failover stays **manual** on purpose.  A lease on shared storage looks automatic
+but cannot be made safe without an atomic compare-and-swap: two nodes renewing a
+file lease concurrently both believe they are the leader, and a split brain
+spends the account budget twice and breaks the per-IP interval. Moving the key
+and flipping ``mode`` is slower and always correct.
 
-Security: the shared secret is a long random string read from a file (mode 600).
-It travels in the ``X-Coord-Secret`` header and is compared in constant time.
-The endpoint speaks plain HTTP, so bind it to a trusted network or put it behind
-a reverse proxy with TLS - see ``docs/COORDINATION.md``.
+Security notes: the shared secret is compared in constant time; the endpoint is
+plain HTTP by design (bind it privately or put TLS in front); remote bans are
+filtered against ``[ignore] ranges`` and the node's own ``server_ip``, capped per
+run, and can never be un-bans.
 """
 from __future__ import annotations
 
+import dataclasses
 import hmac
 import json
+import re
+import subprocess
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import db, iputil, log
 from .config import Config
@@ -47,9 +57,32 @@ MODE_FOLLOWER = "follower"
 MAX_EVENTS_PER_PUSH = 500
 #: Upper bound on how many events the leader accepts in one request.
 MAX_EVENTS_PER_REQUEST = 5000
+#: Upper bound on how many remote bans one sync may apply (safety, per run).
+MAX_REMOTE_BANS = 200
 #: Default HTTP timeout for coordination calls, seconds.
-DEFAULT_TIMEOUT = 15
-USER_AGENT = "fail2ban-abuseipdb-coord/1.3"
+DEFAULT_TIMEOUT = 20
+#: A ban older than this is not worth propagating (the attacker is long gone).
+MAX_PROPAGATION_AGE = 2 * 3600
+USER_AGENT = "fail2ban-abuseipdb-coord/1.4"
+#: Jail names fail2ban accepts; anything else is never passed to the CLI.
+JAIL_RE = re.compile(r"^[A-Za-z0-9._@-]{1,64}$")
+#: meta key holding the follower's sync cursor
+CURSOR_KEY = "coord_since"
+
+#: Runner signature: (argv, timeout) -> (returncode, stdout, stderr)
+Runner = Callable[..., Tuple[int, str, str]]
+
+
+@dataclasses.dataclass
+class SyncResult:
+    """Outcome of one follower sync."""
+
+    pushed: int = 0
+    banned: int = 0
+    merged: int = 0
+    pending: int = 0
+    reason: str = ""
+    next_since: int = 0
 
 
 def mode_of(cfg: Config) -> str:
@@ -100,22 +133,24 @@ class LeaderClient:
         self.secret = secret
         self.timeout = int(timeout or DEFAULT_TIMEOUT)
 
-    def _scheme_ok(self) -> bool:
-        scheme = urllib.parse.urlsplit(self.url).scheme.lower()
-        return scheme in ("http", "https") and bool(urllib.parse.urlsplit(self.url).netloc)
+    def _url_ok(self) -> bool:
+        parts = urllib.parse.urlsplit(self.url)
+        return parts.scheme.lower() in ("http", "https") and bool(parts.netloc)
 
-    def push_events(self, node_id: str, events: Sequence[Dict]) -> Tuple[bool, str]:
-        """POST one batch of events.  Returns ``(delivered, message)``."""
-        if not events:
-            return True, "empty"
-        if not self._scheme_ok():
-            return False, "leader_url must be an http(s) URL, got %r" % (self.url,)
+    def sync(self, node_id: str, events: Sequence[Dict], since: int = 0) -> Tuple[bool, Dict]:
+        """POST one sync request.  Returns ``(delivered, response)``."""
+        if not self._url_ok():
+            return False, {"error": "leader_url must be an http(s) URL, got %r" % (self.url,)}
         if not self.secret:
-            return False, "shared secret is empty"
-        payload = {"node_id": str(node_id or "unknown"), "events": list(events)}
+            return False, {"error": "shared secret is empty"}
+        payload = {
+            "node_id": str(node_id or "unknown"),
+            "events": list(events),
+            "since": int(since or 0),
+        }
         data = json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
-            "%s/v1/push" % self.url,
+            "%s/v1/sync" % self.url,
             data=data,
             headers={
                 "Content-Type": "application/json",
@@ -127,19 +162,19 @@ class LeaderClient:
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 body = response.read().decode("utf-8", "replace")
-                return response.status == 200, body[:200]
+                return response.status == 200, _json_or_empty(body)
         except urllib.error.HTTPError as error:
             try:
-                detail = error.read().decode("utf-8", "replace")[:200]
+                detail = error.read().decode("utf-8", "replace")[:300]
             except Exception:  # noqa: BLE001 - the body is best effort
                 detail = ""
-            return False, "HTTP %s: %s" % (error.code, detail)
+            return False, {"error": "HTTP %s: %s" % (error.code, detail)}
         except Exception as error:  # noqa: BLE001 - transport errors are reported as-is
-            return False, repr(error)
+            return False, {"error": repr(error)}
 
     def get_status(self) -> Optional[Dict]:
         """Fetch the leader's status document (``None`` on any failure)."""
-        if not self._scheme_ok():
+        if not self._url_ok():
             return None
         request = urllib.request.Request(
             "%s/v1/status" % self.url,
@@ -148,9 +183,17 @@ class LeaderClient:
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                return json.loads(response.read().decode("utf-8", "replace"))
+                return _json_or_empty(response.read().decode("utf-8", "replace"))
         except Exception:  # noqa: BLE001 - status is informational only
             return None
+
+
+def _json_or_empty(text: str) -> Dict:
+    try:
+        payload = json.loads(text)
+    except (TypeError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _secret_matches(expected: str, provided: Optional[str]) -> bool:
@@ -160,41 +203,144 @@ def _secret_matches(expected: str, provided: Optional[str]) -> bool:
     return hmac.compare_digest(str(expected), str(provided))
 
 
+def _fail2ban_runner(argv: Sequence[str], timeout: int = 12) -> Tuple[int, str, str]:
+    """Run ``fail2ban-client`` without a shell; returns (rc, stdout, stderr)."""
+    try:
+        result = subprocess.run(
+            list(argv),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        return int(result.returncode), result.stdout or "", result.stderr or ""
+    except (OSError, subprocess.SubprocessError) as error:
+        return 1, "", repr(error)
+
+
+def apply_remote_bans(
+    cfg: Config,
+    items: Sequence,
+    limit: Optional[int] = None,
+    runner: Optional[Runner] = None,
+) -> int:
+    """Ban addresses a peer reported.  Returns how many were applied.
+
+    Rails, in order: the address must parse, must not be in ``[ignore] ranges``,
+    must not be this node's own ``server_ip``, the jail name must look like a jail
+    name, and at most ``limit`` bans are applied per run (default
+    ``max_remote_bans_per_run``, hard ceiling :data:`MAX_REMOTE_BANS`).  The
+    function never un-bans anything.
+    """
+    run = runner or _fail2ban_runner
+    cap = int(limit if limit is not None else getattr(cfg, "max_remote_bans_per_run", 20) or 20)
+    cap = max(1, min(cap, MAX_REMOTE_BANS))
+    own = str(getattr(cfg, "server_ip", "") or "").strip()
+
+    applied = 0
+    for item in list(items or []):
+        if applied >= cap:
+            log.log(cfg, "coord: remote ban cap reached (%d), rest deferred" % cap)
+            break
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("ip") or "").strip()
+        jail = str(item.get("jail") or "").strip()
+        address = iputil.parse_ip(text)
+        if address is None:
+            continue
+        if iputil.is_ignored(address, cfg.ignore_ranges):
+            log.log(cfg, "coord: skip remote ban of ignored address %s" % text)
+            continue
+        if own and text == own:
+            log.log(cfg, "coord: skip remote ban of own server_ip %s" % text)
+            continue
+        if not JAIL_RE.match(jail):
+            log.log(cfg, "coord: skip remote ban with invalid jail %r" % (jail,))
+            continue
+        code, out, err = run(["fail2ban-client", "set", jail, "banip", text])
+        if code == 0:
+            applied += 1
+            log.log(cfg, "coord: remote ban applied %s in %s" % (text, jail))
+        else:
+            # "already banned" is the normal answer for a repeated sync
+            detail = (err or out or "").strip().splitlines()
+            log.log(
+                cfg,
+                "coord: remote ban not applied %s in %s: rc=%s %s"
+                % (text, jail, code, (detail[-1] if detail else "")[:160]),
+            )
+    return applied
+
+
 def pending_batch(cfg: Config, conn) -> List[Dict[str, int]]:
     """Events this follower still has to deliver (used by dry-run too)."""
     limit = min(int(getattr(cfg, "push_batch_size", 50) or 50), MAX_EVENTS_PER_PUSH)
     return events_to_payload(db.pending_events_for_push(conn, limit))
 
 
-def push_pending(cfg: Config, conn) -> Tuple[int, str]:
-    """Follower path: deliver one batch of pending events to the leader.
-
-    Returns ``(marked, reason)``.  ``marked`` is the number of events the leader
-    acknowledged; on any failure it stays 0 and nothing is marked, so the next
-    tick retries the same events.
-    """
+def follower_sync(
+    cfg: Config, conn, runner: Optional[Runner] = None, now: Optional[int] = None
+) -> SyncResult:
+    """Follower path: one two-way sync with the leader."""
+    result = SyncResult()
+    moment = int(now if now is not None else time.time())
     secret = load_secret(getattr(cfg, "shared_secret_file", ""))
     if not secret:
-        return 0, "missing shared secret (%s)" % (getattr(cfg, "shared_secret_file", ""),)
+        result.reason = "missing shared secret (%s)" % (getattr(cfg, "shared_secret_file", ""),)
+        result.pending = db.unpushed_count(conn)
+        return result
     if not getattr(cfg, "leader_url", ""):
-        return 0, "missing leader_url"
+        result.reason = "missing leader_url"
+        result.pending = db.unpushed_count(conn)
+        return result
+
+    since = int(db.get_meta(conn, CURSOR_KEY, "0") or 0)
+    if since <= 0:
+        # First sync: adopt the leader's *recent* bans (bounded by
+        # MAX_PROPAGATION_AGE), not the whole history of the queue.
+        since = moment - MAX_PROPAGATION_AGE
+        db.set_meta(conn, CURSOR_KEY, since)
+
     rows = db.pending_events_for_push(
         conn, min(int(getattr(cfg, "push_batch_size", 50) or 50), MAX_EVENTS_PER_PUSH)
     )
-    if not rows:
-        return 0, "nothing to push"
-
     client = LeaderClient(cfg.leader_url, secret, timeout=int(cfg.timeout))
-    delivered, message = client.push_events(cfg.node_id or "unknown", events_to_payload(rows))
+    delivered, response = client.sync(cfg.node_id or "unknown", events_to_payload(rows), since)
     if not delivered:
-        log.log(cfg, "coord: push of %d events failed: %s" % (len(rows), message))
-        return 0, message
-    marked = db.mark_pushed(conn, [row["id"] for row in rows])
+        result.reason = str(response.get("error") or "sync failed")[:200]
+        result.pending = db.unpushed_count(conn)
+        log.log(cfg, "coord: sync failed: %s" % result.reason)
+        return result
+
+    if rows:
+        result.pushed = db.mark_pushed(conn, [row["id"] for row in rows])
+
+    if getattr(cfg, "sync_bans", True):
+        result.banned = apply_remote_bans(cfg, response.get("to_ban") or [], runner=runner)
+
+    result.merged = db.merge_reported(
+        conn, response.get("recently_reported") or {}, source="leader", now=moment
+    )
+    next_since = int(response.get("next_since") or moment)
+    if next_since > 0:
+        db.set_meta(conn, CURSOR_KEY, next_since)
+        result.next_since = next_since
+
+    result.pending = db.unpushed_count(conn)
+    result.reason = "ok"
     log.log(
         cfg,
-        "coord: pushed %d events to leader %s (%s)" % (marked, cfg.leader_url, message),
+        "coord: sync ok pushed=%d remote_bans=%d cache+%d pending=%d"
+        % (result.pushed, result.banned, result.merged, result.pending),
     )
-    return marked, "ok"
+    return result
+
+
+def push_pending(cfg: Config, conn) -> Tuple[int, str]:
+    """Backward-compatible wrapper around :func:`follower_sync` (1.3 callers)."""
+    result = follower_sync(cfg, conn)
+    return result.pushed, result.reason
 
 
 def accept_events(cfg: Config, events: Sequence, node_id: str = "") -> Dict[str, int]:
@@ -232,6 +378,7 @@ def accept_events(cfg: Config, events: Sequence, node_id: str = "") -> Dict[str,
                 event_time=event_time,
                 bantime=int(event.get("bantime") or 0),
                 failures=int(event.get("failures") or 0),
+                origin=str(node_id or "")[:64],
             ):
                 inserted += 1
     finally:
@@ -242,3 +389,46 @@ def accept_events(cfg: Config, events: Sequence, node_id: str = "") -> Dict[str,
         % (accepted, node_id or "unknown", inserted, rejected),
     )
     return {"accepted": accepted, "inserted": inserted, "rejected": rejected}
+
+
+def sync_response(
+    cfg: Config,
+    node_id: str,
+    events: Sequence,
+    since: int = 0,
+    now: Optional[int] = None,
+) -> Dict:
+    """Full leader answer for one follower sync."""
+    moment = int(now if now is not None else time.time())
+    counts = accept_events(cfg, events, node_id)
+    window = max(int(getattr(cfg, "peer_dedupe_window", 900) or 900), 900)
+    conn = db.connect(cfg.db_path)
+    try:
+        recently = db.recent_reports(conn, moment - window)
+        oldest = max(moment - MAX_PROPAGATION_AGE, int(since or 0))
+        to_ban = db.bans_since(
+            conn,
+            since=oldest,
+            exclude_origin=node_id,
+            limit=int(getattr(cfg, "max_sync_bans", 50) or 50),
+        )
+    finally:
+        conn.close()
+    payload = dict(counts)
+    payload.update(
+        {
+            "ok": True,
+            "node_id": cfg.node_id,
+            "version": _version(),
+            "recently_reported": recently,
+            "to_ban": to_ban,
+            "next_since": moment,
+        }
+    )
+    return payload
+
+
+def _version() -> str:
+    from . import __version__
+
+    return __version__

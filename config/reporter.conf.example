@@ -118,6 +118,20 @@ coord_port = 8765
 # Events per push (1-500).
 push_batch_size = 50
 
+# Follower: apply bans reported by other nodes through fail2ban-client, so an
+# attacker who moves between hosts meets the same block everywhere.
+sync_bans = yes
+
+# Safety rail: at most this many remote bans per run (hard ceiling 200).
+max_remote_bans_per_run = 20
+
+# An address reported inside this window is never reported again by any node
+# (AbuseIPDB allows one report per IP per 15 minutes).
+peer_dedupe_window = 900
+
+# Leader: how many bans one sync answer may carry.
+max_sync_bans = 50
+
 [ignore]
 # Never report these addresses: our own and trusted hosts, private, loopback,
 # reserved, documentation networks and CDN ranges that proxy other people's

@@ -23,11 +23,13 @@ CREATE TABLE IF NOT EXISTS events (
     reported INTEGER NOT NULL DEFAULT 0,
     attempts INTEGER NOT NULL DEFAULT 0,
     pushed INTEGER NOT NULL DEFAULT 0,
+    origin TEXT NOT NULL DEFAULT '',
     note TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_events_pending ON events(reported, ip);
 CREATE INDEX IF NOT EXISTS idx_events_ip ON events(ip, event_time);
 CREATE INDEX IF NOT EXISTS idx_events_push ON events(reported, pushed);
+CREATE INDEX IF NOT EXISTS idx_events_origin ON events(created_at, origin);
 
 CREATE TABLE IF NOT EXISTS reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,6 +43,16 @@ CREATE TABLE IF NOT EXISTS reports (
 );
 CREATE INDEX IF NOT EXISTS idx_reports_ip ON reports(ip, reported_at);
 CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status, reported_at);
+
+-- IPs recently reported by this node or by a peer (coordination, 1.4.0):
+-- kept locally so a node never sends a second report for one address inside the
+-- AbuseIPDB window, not even right after a role change or a failover.
+CREATE TABLE IF NOT EXISTS reported_cache (
+    ip TEXT PRIMARY KEY,
+    reported_at INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_reported_at ON reported_cache(reported_at);
 
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
@@ -85,6 +97,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(events)")}
     if "pushed" not in columns:
         conn.execute("ALTER TABLE events ADD COLUMN pushed INTEGER NOT NULL DEFAULT 0")
+    if "origin" not in columns:
+        conn.execute("ALTER TABLE events ADD COLUMN origin TEXT NOT NULL DEFAULT ''")
     conn.commit()
 
 
@@ -96,8 +110,13 @@ def enqueue(
     bantime: int = 0,
     failures: int = 0,
     dedupe_window: int = 300,
+    origin: str = "",
 ) -> bool:
     """Insert a ban event, collapsing repeated bans of the same IP+jail.
+
+    ``origin`` names the node that reported the ban (empty for local bans) and is
+    what the coordination endpoint uses to avoid sending a ban straight back to
+    the node it came from.
 
     Returns True when a new row was inserted, False when an existing pending
     row was updated (deduplication window).
@@ -105,6 +124,7 @@ def enqueue(
     now = int(event_time if event_time is not None else time.time())
     bantime = int(bantime or 0)
     failures = int(failures or 0)
+    origin = str(origin or "")[:64]
     row = conn.execute(
         "SELECT id FROM events WHERE ip=? AND jail=? AND reported=? AND pushed=0 AND created_at>=?"
         " ORDER BY id DESC LIMIT 1",
@@ -118,9 +138,9 @@ def enqueue(
         conn.commit()
         return False
     conn.execute(
-        "INSERT INTO events(ip, jail, event_time, bantime, failures, created_at)"
-        " VALUES (?,?,?,?,?,?)",
-        (ip, jail, now, bantime, failures, now),
+        "INSERT INTO events(ip, jail, event_time, bantime, failures, created_at, origin)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (ip, jail, now, bantime, failures, now, origin),
     )
     conn.commit()
     return True
@@ -249,7 +269,7 @@ def unpushed_count(conn: sqlite3.Connection) -> int:
 
 
 def cleanup(conn: sqlite3.Connection, retention_days: int, now: Optional[int] = None) -> None:
-    """Drop finished events and old report records."""
+    """Drop finished events, old report records and stale peer cache entries."""
     now = int(now if now is not None else time.time())
     cutoff = now - int(retention_days) * 86400
     conn.execute("DELETE FROM events WHERE reported!=? AND created_at<?", (PENDING, cutoff))
@@ -258,4 +278,112 @@ def cleanup(conn: sqlite3.Connection, retention_days: int, now: Optional[int] = 
         "DELETE FROM events WHERE reported=? AND pushed=1 AND created_at<?", (PENDING, cutoff)
     )
     conn.execute("DELETE FROM reports WHERE reported_at<?", (cutoff,))
+    conn.execute("DELETE FROM reported_cache WHERE reported_at<?", (cutoff,))
     conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# coordination helpers (1.4.0)
+# ---------------------------------------------------------------------------
+def get_meta(conn: sqlite3.Connection, key: str, default: str = "") -> str:
+    row = conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+    return str(row[0]) if row and row[0] is not None else default
+
+
+def set_meta(conn: sqlite3.Connection, key: str, value) -> None:
+    conn.execute(
+        "INSERT INTO meta(key, value) VALUES (?, ?)"
+        " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (str(key), str(value)),
+    )
+    conn.commit()
+
+
+def recent_reports(
+    conn: sqlite3.Connection, since: int, limit: int = 500
+) -> dict:
+    """IPs this node reported successfully since *since*: ``{ip: last_ts}``."""
+    rows = conn.execute(
+        "SELECT ip, MAX(reported_at) AS ts FROM reports"
+        " WHERE status=200 AND reported_at>=? GROUP BY ip ORDER BY ts DESC LIMIT ?",
+        (int(since), int(limit)),
+    ).fetchall()
+    return {str(row["ip"]): int(row["ts"]) for row in rows}
+
+
+def merge_reported(
+    conn: sqlite3.Connection,
+    mapping: dict,
+    source: str = "leader",
+    now: Optional[int] = None,
+) -> int:
+    """Store peer-reported timestamps locally; returns the number of entries kept.
+
+    A timestamp far in the future is a broken clock or a hostile peer, so it is
+    clamped to *now*: a wrong future value would otherwise block reports for that
+    address for a very long time.
+    """
+    now = int(now if now is not None else time.time())
+    kept = 0
+    for ip, ts in (mapping or {}).items():
+        try:
+            stamp = int(ts)
+        except (TypeError, ValueError):
+            continue
+        text = str(ip or "").strip()
+        if not text or stamp <= 0:
+            continue
+        stamp = min(stamp, now)
+        conn.execute(
+            "INSERT INTO reported_cache(ip, reported_at, source) VALUES (?,?,?)"
+            " ON CONFLICT(ip) DO UPDATE SET"
+            " reported_at=MAX(reported_cache.reported_at, excluded.reported_at),"
+            " source=excluded.source",
+            (text, stamp, str(source or "")[:32]),
+        )
+        kept += 1
+    conn.commit()
+    return kept
+
+
+def is_recently_reported(
+    conn: sqlite3.Connection, ip: str, window: int = 900, now: Optional[int] = None
+) -> bool:
+    """True when *ip* was reported (here or by a peer) inside the window."""
+    row = conn.execute(
+        "SELECT reported_at FROM reported_cache WHERE ip=?", (str(ip),)
+    ).fetchone()
+    if not row:
+        return False
+    moment = int(now if now is not None else time.time())
+    return (moment - int(row[0])) < int(window)
+
+
+def bans_since(
+    conn: sqlite3.Connection, since: int, exclude_origin: str = "", limit: int = 50
+) -> List[dict]:
+    """Bans created after *since* that a peer does not have yet.
+
+    ``exclude_origin`` is the asking node: an event that node sent must not be
+    sent back to it.  One entry per (ip, jail), newest first.
+    """
+    query = (
+        "SELECT ip, jail, MAX(event_time) AS event_time, MAX(bantime) AS bantime"
+        " FROM events WHERE created_at>?"
+    )
+    args = [int(since)]
+    if exclude_origin:
+        query += " AND origin<>?"
+        args.append(str(exclude_origin))
+    query += " GROUP BY ip, jail ORDER BY event_time DESC LIMIT ?"
+    args.append(int(limit))
+    rows = conn.execute(query, args).fetchall()
+    return [
+        {
+            "ip": str(row["ip"]),
+            "jail": str(row["jail"]),
+            "event_time": int(row["event_time"] or 0),
+            "bantime": int(row["bantime"] or 0),
+        }
+        for row in rows
+    ]

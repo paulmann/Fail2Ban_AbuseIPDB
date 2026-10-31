@@ -67,6 +67,7 @@ def _stats_text(cfg: Config) -> str:
         for label, query, args in (
             ("pending events", "SELECT COUNT(*) FROM events WHERE reported=0", ()),
             ("pushed to leader", "SELECT COUNT(*) FROM events WHERE reported=0 AND pushed=1", ()),
+            ("reported cache", "SELECT COUNT(*) FROM reported_cache", ()),
             ("pending ips", "SELECT COUNT(DISTINCT ip) FROM events WHERE reported=0", ()),
             ("invalid (2)", "SELECT COUNT(*) FROM events WHERE reported=2", ()),
             ("gave up (3)", "SELECT COUNT(*) FROM events WHERE reported=3", ()),
@@ -122,6 +123,13 @@ def _coord_status(cfg: Config) -> int:
             print("leader: unreachable")
             return 1
         print("leader: %s" % json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        conn = db.connect(cfg.db_path)
+        try:
+            print("pending: %d" % db.unpushed_count(conn))
+            print("sync cursor: %s" % (db.get_meta(conn, coordination.CURSOR_KEY, "0") or 0))
+            print("reported cache: %d" % conn.execute("SELECT COUNT(*) FROM reported_cache").fetchone()[0])
+        finally:
+            conn.close()
         return 0
     conn = db.connect(cfg.db_path)
     try:

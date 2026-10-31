@@ -27,6 +27,8 @@ from .config import Config, load_config
 #: Refuse requests larger than this (a push batch is a few kilobytes).
 MAX_BODY_BYTES = 1024 * 1024
 #: Route names, kept short because they are typed into firewalls and proxies.
+SYNC_PATH = "/v1/sync"
+#: 1.3 name of the same endpoint; kept so an older follower keeps working.
 PUSH_PATH = "/v1/push"
 STATUS_PATH = "/v1/status"
 
@@ -66,7 +68,7 @@ class CoordHandler(BaseHTTPRequestHandler):
 
     # -- routes ----------------------------------------------------------
     def do_POST(self) -> None:  # noqa: N802 - stdlib naming
-        if self._path() != PUSH_PATH:
+        if self._path() not in (SYNC_PATH, PUSH_PATH):
             self._send(404, {"error": "not found"})
             return
         if not self._authorised():
@@ -88,10 +90,17 @@ class CoordHandler(BaseHTTPRequestHandler):
         if not isinstance(payload, dict) or not isinstance(payload.get("events"), list):
             self._send(400, {"error": "events must be a list"})
             return
-        result = coordination.accept_events(
-            self.cfg, payload["events"], str(payload.get("node_id") or "")
+        try:
+            since = int(payload.get("since") or 0)
+        except (TypeError, ValueError):
+            since = 0
+        answer = coordination.sync_response(
+            self.cfg,
+            str(payload.get("node_id") or ""),
+            payload["events"],
+            since=since,
         )
-        self._send(200, result)
+        self._send(200, answer)
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib naming
         if self._path() != STATUS_PATH:
@@ -119,6 +128,7 @@ def leader_status(cfg: Config) -> Dict[str, object]:
             "version": __version__,
             "pending": db.pending_count(conn),
             "unpushed": db.unpushed_count(conn),
+            "sync_cursor": int(db.get_meta(conn, coordination.CURSOR_KEY, "0") or 0),
         }
     finally:
         conn.close()

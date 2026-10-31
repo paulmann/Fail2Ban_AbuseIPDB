@@ -78,11 +78,21 @@ security rules: [COORDINATION.md](COORDINATION.md).
 | `shared_secret_file` | `/etc/abuseipdb/.coord.secret` | file holding the shared secret (mode 600, identical everywhere) |
 | `coord_bind` | `127.0.0.1` | leader only: address the endpoint binds to |
 | `coord_port` | `8765` | leader only: port of the endpoint |
-| `push_batch_size` | `50` | events per push (1-500) |
+| `push_batch_size` | `50` | events per sync (1-500) |
+| `sync_bans` | `yes` | follower: apply bans reported by other nodes through `fail2ban-client` |
+| `max_remote_bans_per_run` | `20` | follower: cap on remote bans applied per run (ceiling 200) |
+| `peer_dedupe_window` | `900` | seconds an address counts as "already reported" by the cluster |
+| `max_sync_bans` | `50` | leader: cap on bans carried by one sync answer |
 
 An unknown `mode` value is treated as `none`, so a typo can never turn a node
 into a follower of nobody. The coordination HTTP timeout reuses
 `[abuseipdb] timeout`.
+
+A sync is two-way: the follower sends its bans and receives the address list the
+cluster already reported plus the bans it is missing. `sync_bans = no` keeps the
+sync but stops the follower from applying remote bans; `peer_dedupe_window` is
+how long an address stays "already reported". Full guide:
+[COORDINATION.md](COORDINATION.md).
 
 ## `[report]`
 

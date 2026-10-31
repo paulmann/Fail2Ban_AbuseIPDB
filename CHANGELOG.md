@@ -4,6 +4,45 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] - 2026-11-01
+
+### Added
+
+* **Two-way sync between nodes.** `POST /v1/sync` now answers with
+  `recently_reported`, `to_ban` and `next_since` in addition to the counters; the
+  follower sends its cursor (`since`) so it receives only what it is missing.
+  `POST /v1/push` keeps working, so a 1.3.x follower still syncs.
+* **Ban propagation.** A ban seen on one node is applied on the others through
+  `fail2ban-client set <jail> banip <address>`, so an attacker who moves between
+  hosts meets the same block everywhere. Rails: the address must parse, must not
+  be in `[ignore] ranges`, must not be the node's own `server_ip`, the jail name
+  must match `^[A-Za-z0-9._@-]{1,64}$`, at most `max_remote_bans_per_run` (20,
+  ceiling 200) per run, and nothing can ever be unbanned. `sync_bans = no`
+  disables it.
+* **Report deduplication across the cluster.** New `reported_cache` table: the
+  leader sends the addresses it reported inside `peer_dedupe_window` (900 s), a
+  follower merges them, and the reporting path skips an address that is already
+  in the cache (events are marked reported, no API call is spent). Timestamps from
+  a peer are clamped to now, so a broken clock cannot block an address.
+* `events.origin` column (in-place migration): a ban is never echoed back to the
+  node that reported it.
+* `--stats` prints the `reported cache` size; `--coord-status` on a follower also
+  shows the sync cursor and the cache size.
+* Config keys: `sync_bans`, `max_remote_bans_per_run`, `peer_dedupe_window`,
+  `max_sync_bans`.
+
+### Changed
+
+* The first sync adopts the leader's bans from the **last two hours** (bounded by
+  `max_sync_bans`), not its whole queue history - a new node should not replay
+  thousands of old bans in one tick.
+* `RunResult.banned` reports how many remote bans a follower applied; the status
+  file and the log line carry it.
+* Docs: `docs/COORDINATION.md` rewritten for the two-way protocol (payloads,
+  cursor semantics, rails, failure modes); CONFIGURATION, ARCHITECTURE, README and
+  AGENTS updated.
+* Tests: **175** (was 152).
+
 ## [1.3.0] - 2026-10-31
 
 ### Added
@@ -185,3 +224,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 [1.2.0]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.2.0
 [1.2.1]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.2.1
 [1.3.0]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.3.0
+[1.4.0]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.0

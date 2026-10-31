@@ -12,15 +12,15 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20systemd%20%7C%20cron-lightgrey)](#requirements-and-compatibility)
-[![Tests](https://img.shields.io/badge/tests-152%20passing-brightgreen.svg)](tests)
-[![Wiki](https://img.shields.io/badge/wiki-19%20pages-8A2BE2)](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki)
+[![Tests](https://img.shields.io/badge/tests-175%20passing-brightgreen.svg)](tests)
+[![Wiki](https://img.shields.io/badge/wiki-20%20pages-8A2BE2)](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki)
 [![Stars](https://img.shields.io/github/stars/paulmann/Fail2Ban_AbuseIPDB?style=social&label=Stars)](https://github.com/paulmann/Fail2Ban_AbuseIPDB/stargazers)
 
 Fail2Ban knows **who** attacked and **why**. AbuseIPDB wants a short factual report per abusive IP. The stock integration runs `curl` inside the ban action, so the ban, the firewall and a remote API become one synchronous root-shell path: a slow API delays bans, a rate limit makes actions fail, a restart re-reports restored bans, and attacker-controlled log text is interpolated into a shell command.
 
 This project separates the two paths. The ban stays local and instant. A small SQLite queue stores what happened. A scheduled worker (systemd timer or cron, every 16 minutes) turns the queue into evidence-backed reports, respects AbuseIPDB rate limits, retries failures and never blocks the firewall. The API key lives in its own file, and `abuseipdb-upgrade` updates the installation from GitHub without losing the key, the configuration, the queue or the jail list.
 
-> **Documentation status.** Counts in this README were re-measured from the working tree on 2026-10-31 (v1.3.0): 152 tests, 16 source modules, 82 tracked files, 19 wiki pages. The operator-facing long-form documentation lives in the [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki); the design-level documents live under [`docs/`](docs/).
+> **Documentation status.** Counts in this README were re-measured from the working tree on 2026-11-01 (v1.4.0): 175 tests, 16 source modules, 86 tracked files, 20 wiki pages. The operator-facing long-form documentation lives in the [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki); the design-level documents live under [`docs/`](docs/).
 
 ---
 
@@ -122,24 +122,24 @@ The caveat that matters: the project does not ban better than fail2ban and does 
 | **Safe installer** | Backs up every replaced file, runs `fail2ban-client -t` before restarting, keeps state for a clean uninstall, supports staging with `--root`. |
 | **Self-advertising footer** | Every report ends with a configurable attribution line; disable it with `attribution = no` or replace it with your own. |
 | **Extensible classifiers** | Evidence per service through a registry (`sshd`, FTP, SMTP, mailbox, web, generic fallback): a new jail is one entry, not a patch of the core loop. |
-| **Several hosts, one account** | Optional `leader`/`follower` roles: only the leader holds the API key and reports, followers push their events over an authenticated endpoint. `mode = none` (default) keeps every node standalone. |
-| **Tested and gated** | 152 unit/integration tests, shellcheck, staged install/uninstall, CI on Python 3.9-3.13, tag-driven release workflow. |
+| **Several hosts, one account** | Optional `leader`/`follower` roles: only the leader holds the API key and reports, followers push their bans over an authenticated endpoint. The sync is two-way: followers receive the bans they are missing (applied through `fail2ban-client`) and the list of addresses already reported, so the cluster never reports one address twice. `mode = none` (default) keeps every node standalone. |
+| **Tested and gated** | 175 unit/integration tests, shellcheck, staged install/uninstall, CI on Python 3.9-3.13, tag-driven release workflow. |
 
 ---
 
 ## By the numbers
 
-Measured from the working tree on 2026-10-31 (v1.3.0):
+Measured from the working tree on 2026-11-01 (v1.4.0):
 
 | Surface | Count | Measured from |
 |---|---|---|
-| Python package modules | **16** files · 2,978 lines | `src/abuseipdb_reporter/*.py` |
-| Tests | **152** passing (1 skipped on Windows only) | `python -m unittest discover -s tests -t .` |
-| Test code | 15 files · 2,249 lines | `tests/` |
+| Python package modules | **16** files · 3,352 lines | `src/abuseipdb_reporter/*.py` |
+| Tests | **175** passing (1 skipped on Windows only) | `python -m unittest discover -s tests -t .` |
+| Test code | 16 files · 2,662 lines | `tests/` |
 | Installer and shell tooling | 863 lines | `*.sh` + `tests/integration/*.sh` |
-| Documentation pages | 12 · 1,556 lines | `docs/*.md` |
-| Wiki pages | 19 | `Fail2Ban_AbuseIPDB.wiki` |
-| Tracked files | 82 | `git ls-files` |
+| Documentation pages | 13 · 1,757 lines | `docs/*.md` |
+| Wiki pages | 20 | `Fail2Ban_AbuseIPDB.wiki` |
+| Tracked files | 86 | `git ls-files` |
 | Runtime dependencies | **0** | `pyproject.toml` (none) |
 | Worker memory | about 13 MB RSS | measured on a production host |
 | Enqueue latency | about 0.1 s | 10 enqueues in 1.06 s, including interpreter start-up |
@@ -512,7 +512,7 @@ attribution_text = Reported via Fail2Ban_AbuseIPDB Monitor: https://github.com/p
 manifest_url = https://raw.githubusercontent.com/paulmann/Fail2Ban_AbuseIPDB/main/updater.json
 
 [coordination]
-# One account, several hosts: one leader reports, the rest push their events.
+# One account, several hosts: one leader reports, the rest push and receive bans.
 mode = none                    # none | leader | follower
 node_id = server1
 leader_url =                   # follower only, e.g. http://10.0.0.5:8765
@@ -520,6 +520,9 @@ shared_secret_file = /etc/abuseipdb/.coord.secret   # mode 600, same on every no
 coord_bind = 127.0.0.1         # leader only; 0.0.0.0 only behind a firewall
 coord_port = 8765
 push_batch_size = 50
+sync_bans = yes                # follower applies remote bans via fail2ban-client
+max_remote_bans_per_run = 20   # safety rail per run (ceiling 200)
+peer_dedupe_window = 900       # "already reported" window, seconds
 
 [ignore]
 # private, loopback, reserved, your own management networks and CDN ranges
@@ -757,7 +760,7 @@ Windows and macOS are not supported for deployment (the fail2ban action and the 
 
 | Document | Contents |
 |---|---|
-| [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki) | 19 pages: why, getting started, architecture, configuration, keys, self-update, report anatomy, Fail2Ban fundamentals, web protection, SSH/mail/FTP, verification and rollback, three agent-prompt collections, troubleshooting, FAQ, development, multi-host coordination |
+| [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki) | 20 pages: why, getting started, architecture, configuration, keys, self-update, report anatomy, Fail2Ban fundamentals, web protection, SSH/mail/FTP, verification and rollback, three agent-prompt collections, troubleshooting, FAQ, development, multi-host coordination (roles, two-way sync, ban propagation) |
 | [`docs/INSTALL.md`](docs/INSTALL.md) | installation reference, options, verification, upgrade, uninstall |
 | [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) | every option, key resolution, categories, ignore ranges |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | ban path, report path, queue schema, evidence, classifiers, status file, key file, updater |
@@ -774,7 +777,7 @@ Start with [Wiki — Getting Started](https://github.com/paulmann/Fail2Ban_Abuse
 ## Development
 
 ```bash
-# 152 unit tests (Python 3.9+, no network, no root)
+# 175 unit tests (Python 3.9+, no network, no root)
 python -m unittest discover -s tests -t .
 
 # end-to-end test: real worker + queue + mock AbuseIPDB API (no external calls)

@@ -28,6 +28,7 @@ class RunResult:
     today: int = 0
     retry_after: int = 0
     waited: float = 0.0
+    banned: int = 0
     payloads: List[Dict[str, str]] = field(default_factory=list)
     stopped_reason: str = ""
 
@@ -112,13 +113,18 @@ def _publish(
 
 
 def _run_follower(
-    cfg: Config, result: RunResult, now: int, dry_run: bool
+    cfg: Config,
+    result: RunResult,
+    now: int,
+    dry_run: bool,
+    runner: Optional[coordination.Runner] = None,
 ) -> RunResult:
-    """Follower role: hand queued events to the leader, never call the API.
+    """Follower role: two-way sync with the leader, never call the API.
 
-    ``result.sent`` counts events the leader acknowledged; ``pending`` counts
-    events still waiting for delivery, so a growing number is a real symptom
-    (leader down, wrong secret) rather than a normal steady state.
+    ``result.sent`` counts events the leader accepted, ``result.banned`` counts
+    remote bans applied here through ``fail2ban-client``, and ``pending`` counts
+    events still waiting for delivery - a growing number is a real symptom (leader
+    down, wrong secret), not a steady state.
     """
     conn = db.connect(cfg.db_path)
     try:
@@ -128,13 +134,14 @@ def _run_follower(
             result.stopped_reason = "follower dry-run"
             log.log(cfg, "coord: dry-run, would push %d event(s)" % len(batch))
         else:
-            pushed, reason = coordination.push_pending(cfg, conn)
-            result.sent = pushed
-            result.stopped_reason = "follower (%s)" % reason
+            synced = coordination.follower_sync(cfg, conn, runner=runner, now=now)
+            result.sent = synced.pushed
+            result.banned = synced.banned
+            result.stopped_reason = "follower (%s)" % synced.reason
             log.log(
                 cfg,
-                "coord: follower run done pushed=%d pending=%d (%s)"
-                % (pushed, db.unpushed_count(conn), reason),
+                "coord: follower run done pushed=%d banned=%d pending=%d (%s)"
+                % (synced.pushed, synced.banned, synced.pending, synced.reason),
             )
         db.cleanup(conn, int(cfg.retention_days), now=now)
         result.pending = db.unpushed_count(conn)
@@ -149,8 +156,13 @@ def run_once(
     now: Optional[int] = None,
     dry_run: bool = False,
     http: Optional[HttpFunction] = None,
+    runner: Optional[coordination.Runner] = None,
 ) -> RunResult:
-    """Process the queue once.  Returns counters and (for dry-run) payloads."""
+    """Process the queue once.  Returns counters and (for dry-run) payloads.
+
+    ``runner`` is the injectable ``fail2ban-client`` callable used by the follower
+    role to apply remote bans (tests pass a fake; production uses subprocess).
+    """
     http = http or api.request
     result = RunResult()
     now = int(now if now is not None else time.time())
@@ -160,7 +172,7 @@ def run_once(
         _publish(cfg, result, now, dry_run=dry_run)
         return result
     if coordination.is_follower(cfg):
-        return _run_follower(cfg, result, now, dry_run)
+        return _run_follower(cfg, result, now, dry_run, runner=runner)
     if not cfg.api_key and not dry_run:
         result.stopped_reason = "missing api key"
         log.log(cfg, "report: ERROR api_key is empty")
@@ -203,6 +215,16 @@ def run_once(
             last = db.last_success(conn, ip)
             if last and now - last < int(cfg.min_interval_ip):
                 result.skipped += 1
+                continue
+            if db.is_recently_reported(
+                conn, ip, getattr(cfg, "peer_dedupe_window", 900), now=now
+            ):
+                # A peer (or this node before a role change) already reported it:
+                # finish the events locally, never spend the API call twice.
+                db.mark_reported(conn, ip)
+                conn.commit()
+                result.skipped += 1
+                log.log(cfg, "report: %s already reported recently, skipped" % ip)
                 continue
 
             events = db.events_for(conn, ip)

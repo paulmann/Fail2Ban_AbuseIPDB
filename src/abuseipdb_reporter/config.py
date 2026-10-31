@@ -168,6 +168,14 @@ class Config:
     coord_port: int = 8765
     coord_bind: str = "127.0.0.1"
     push_batch_size: int = 50
+    #: Follower: apply bans reported by other nodes through fail2ban-client.
+    sync_bans: bool = True
+    #: Safety cap on how many remote bans one run may apply.
+    max_remote_bans_per_run: int = 20
+    #: How long an address counts as "already reported" (AbuseIPDB: 15 minutes).
+    peer_dedupe_window: int = 900
+    #: Leader: how many bans one sync answer may carry.
+    max_sync_bans: int = 50
     #: Empty by default: a directly constructed Config (tests, embedders) must
     #: not write files outside its own directory.  ``load_config`` fills the
     #: default path from ``[logging] status_path``.
@@ -260,6 +268,14 @@ def load_config(path: Optional[str] = None, quiet: bool = False) -> Config:
         push_batch_size=min(
             5000, max(1, _as_int(get("coordination", "push_batch_size", "50"), 50))
         ),
+        sync_bans=_as_bool(get("coordination", "sync_bans", "yes"), True),
+        max_remote_bans_per_run=min(
+            200, max(1, _as_int(get("coordination", "max_remote_bans_per_run", "20"), 20))
+        ),
+        peer_dedupe_window=max(
+            300, _as_int(get("coordination", "peer_dedupe_window", "900"), 900)
+        ),
+        max_sync_bans=max(1, _as_int(get("coordination", "max_sync_bans", "50"), 50)),
         status_path=get("logging", "status_path", DEFAULT_STATUS_PATH).strip(),
         prometheus_textfile=get("logging", "prometheus_textfile", "").strip(),
         ignore_ranges=parse_ranges(ranges_raw),

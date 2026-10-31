@@ -183,17 +183,19 @@ times faster and break the per-IP interval between hosts.
 
 | Role | Path |
 |---|---|
-| `follower` | `abuseipdb-report` → `coordination.push_pending()` → `POST /v1/push` → mark `events.pushed = 1` |
-| `leader` | `abuseipdb-coord` accepts the batch → filters it (valid address, not ignored, jail not skipped) → `db.enqueue()` into the leader's own queue → the normal worker reports it |
+| `follower` | `abuseipdb-report` → `coordination.follower_sync()` → `POST /v1/sync` → apply `to_ban`, merge `recently_reported`, mark `events.pushed = 1` |
+| `leader` | `abuseipdb-coord` accepts the batch → filters it (valid address, not ignored, jail not skipped) → `db.enqueue(origin=node)` → answers with `to_ban` and `recently_reported` → the normal worker reports it |
 
-The `pushed` column is added by an in-place migration in `db.connect()`, is
-excluded from every local reporting query, and is cleaned up by
-`retention_days`. A lost acknowledgement is harmless: the follower retries the
-same batch and the leader's 5-minute deduplication answers `inserted: 0`.
+The sync is two-way and the state lives in three places: `events.pushed` (delivered
+to the leader), `events.origin` (which node reported a ban, so it is never echoed
+back), and `reported_cache` (addresses reported by anyone in the cluster inside
+`peer_dedupe_window` — the reporting path checks it before spending an API call).
+Remote bans are applied through `fail2ban-client` with rails: ignore ranges, own
+`server_ip`, a strict jail-name pattern, a per-run cap, and no unban at all.
 
-There is no election and no shared lease on purpose: failover is a documented
-manual procedure (move the key, switch `mode`), which cannot split the budget
-between two leaders the way a broken quorum can.
+There is no election and no shared lease on purpose: a lease file cannot be made
+safe without an atomic compare-and-swap, and a split brain spends the budget
+twice. Failover is a documented manual procedure (move the key, switch `mode`).
 
 ## Scheduling
 
