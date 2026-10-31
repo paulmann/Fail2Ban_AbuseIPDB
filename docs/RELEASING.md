@@ -79,9 +79,10 @@ can be revoked; the CI path does not read it.
 6. **Update `updater.json`** with the checksum the workflow printed in its
    summary (`Show the checksum for updater.json`), then commit and push. The
    self-updater reads this file, so it is what makes `abuseipdb-upgrade --check`
-   see the new version. `raw.githubusercontent.com` caches it for a few minutes -
-   verify through `api.github.com/repos/<owner>/<repo>/contents/updater.json` if
-   `--check` still reports the old version.
+   see the new version. Since 1.4.3 the updater appends `_f2b_nocache=<epoch>` to
+   a `raw.githubusercontent.com` URL, so the CDN cache (`max-age=300`) no longer
+   hides a fresh manifest; a host still running 1.4.2 or older may need those five
+   minutes once.
 
 7. **Update the wiki** (`Home` badges, `17-Development-and-Testing`,
    `18-Multi-Host-Coordination` when the feature changed) and the `AGENTS.md`

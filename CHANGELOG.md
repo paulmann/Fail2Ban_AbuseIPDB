@@ -4,6 +4,24 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.3] - 2026-11-01
+
+### Fixed
+
+* **`--check` kept reporting "you are running the latest version" right after a
+  release.** `updater.json` is served by `raw.githubusercontent.com`, whose CDN
+  answers `Cache-Control: max-age=300`; for up to five minutes the updater read
+  the previous manifest and saw no update. The manifest request now carries a
+  unique `_f2b_nocache=<epoch>` parameter, which the CDN keys on and the origin
+  ignores, so a fresh release is visible immediately. Only
+  `raw.githubusercontent.com` is affected - a self-hosted or signed manifest URL
+  is requested unchanged, because a stray parameter could break a signature.
+
+### Changed
+
+* Tests: **188** (was 183) - the cache buster (unique per call, existing query
+  preserved, other hosts untouched) and the fact that `fetch_manifest` uses it.
+
 ## [1.4.2] - 2026-11-01
 
 ### Changed
@@ -267,3 +285,4 @@ release ships the build pipeline, not new behaviour.
 [1.4.0]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.0
 [1.4.1]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.1
 [1.4.2]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.2
+[1.4.3]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.3

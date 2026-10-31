@@ -235,5 +235,60 @@ class CliTests(unittest.TestCase):
             self.assertEqual(updater.main_upgrade(["--upgrade"]), 1)
 
 
+class CacheBusterTests(unittest.TestCase):
+    """The CDN must never hide a fresh manifest behind a five-minute cache."""
+
+    def test_github_raw_gets_a_query(self):
+        url = "https://raw.githubusercontent.com/o/r/main/updater.json"
+        built = updater.cache_busted(url, stamp=1767225600)
+        self.assertTrue(built.startswith(url + "?_f2b_nocache="))
+        self.assertTrue(built.endswith("1767225600"))
+
+    def test_existing_query_is_kept(self):
+        url = "https://raw.githubusercontent.com/o/r/main/updater.json?ref=main"
+        built = updater.cache_busted(url, stamp=5)
+        self.assertIn("ref=main", built)
+        self.assertIn("_f2b_nocache=5", built)
+        self.assertEqual(built.count("?"), 1)
+
+    def test_other_hosts_are_untouched(self):
+        for url in (
+            "https://example.com/updater.json",
+            "https://updates.example.com/x/updater.json?sig=abc",
+            "http://127.0.0.1:8000/updater.json",
+        ):
+            self.assertEqual(updater.cache_busted(url, stamp=5), url)
+
+    def test_cache_buster_is_unique_per_call(self):
+        url = "https://raw.githubusercontent.com/o/r/main/updater.json"
+        self.assertNotEqual(updater.cache_busted(url, stamp=1), updater.cache_busted(url, stamp=2))
+
+    def test_manifest_fetch_uses_the_busted_url(self):
+        seen = []
+
+        class Response:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def read(self):
+                return self.payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def opener(url, timeout):
+            seen.append(url)
+            return Response(b'{"version": "1.4.3", "tarball": "x", "sha256": "y"}')
+
+        manifest = updater.fetch_manifest(
+            "https://raw.githubusercontent.com/o/r/main/updater.json", opener=opener
+        )
+        self.assertEqual(manifest["version"], "1.4.3")
+        self.assertIn("_f2b_nocache=", seen[0])
+
+
 if __name__ == "__main__":
     unittest.main()

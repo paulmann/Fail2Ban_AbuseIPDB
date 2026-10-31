@@ -18,7 +18,9 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Callable, Dict, Optional, Tuple
 
@@ -70,7 +72,35 @@ def _urlopen(url: str, timeout: int):
     return urllib.request.urlopen(request, timeout=timeout)
 
 
+#: Hosts that serve files through a CDN with a short but real TTL.
+CDN_HOSTS = ("raw.githubusercontent.com",)
+#: Query parameter used to skip the CDN cache; ignored by the origin.
+CACHE_BUSTER = "_f2b_nocache"
+
+
+def cache_busted(url: str, stamp: Optional[int] = None) -> str:
+    """Add a one-shot query parameter to a CDN URL, leave everything else alone.
+
+    ``raw.githubusercontent.com`` answers ``Cache-Control: max-age=300``, so right
+    after a release ``--check`` keeps reading the previous ``updater.json`` for up
+    to five minutes and wrongly reports "you are running the latest version".
+    The CDN keys on the full URL, so a unique query string goes to the origin.
+    Any other host (self-hosted manifest, signed URL) is returned untouched: a
+    stray parameter there could break the signature.
+    """
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return url
+    if (parts.hostname or "").lower() not in CDN_HOSTS:
+        return url
+    moment = int(stamp if stamp is not None else time.time())
+    query = parts.query + ("&" if parts.query else "") + "%s=%d" % (CACHE_BUSTER, moment)
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+
 def fetch_manifest(url: str, timeout: int = 20, opener: Callable = _urlopen) -> Dict:
+    url = cache_busted(url)
     try:
         with opener(url, timeout) as response:
             payload = response.read().decode("utf-8", "replace")

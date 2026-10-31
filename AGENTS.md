@@ -1,9 +1,9 @@
-# AGENTS.md — Fail2Ban_AbuseIPDB 1.4.2
+# AGENTS.md — Fail2Ban_AbuseIPDB 1.4.3
 
 Agent-facing guide: how to install Fail2Ban_AbuseIPDB, run it, and report problems responsibly.
 Human documentation: [README.md](README.md), [docs/](docs/), [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki).
 
-> Verified against repository state on 2026-11-01. Version covered: 1.4.2 (tag `v1.4.2`, released 2026-11-01).
+> Verified against repository state on 2026-11-01. Version covered: 1.4.3 (tag `v1.4.3`, released 2026-11-01).
 
 ## 1. What it is
 
@@ -34,10 +34,10 @@ If a check fails, stop and report; do not work around it silently.
 
 ### 3.1 From a release
 
-Releases verified with `gh release list -R paulmann/Fail2Ban_AbuseIPDB`: `v1.4.2` (latest), `v1.4.1`, `v1.4.0`, `v1.3.0`, `v1.2.1`, `v1.2.0`, `v1.1.1`, `v1.1.0`, `v1.0.0`. The v1.4.2 asset is `Fail2Ban_AbuseIPDB-1.4.2.tar.gz`; its SHA-256 is authoritative in [`updater.json`](updater.json), which the updater verifies before running the bundled `install.sh` - never trust a checksum quoted in prose. The repository does not document a manual install from the downloaded archive; the documented consumer of that asset is `abuseipdb-upgrade` ([docs/UPDATE.md](docs/UPDATE.md)). For a first install, pin the verified tag in a checkout:
+Releases verified with `gh release list -R paulmann/Fail2Ban_AbuseIPDB`: `v1.4.3` (latest), `v1.4.2`, `v1.4.1`, `v1.4.0`, `v1.3.0`, `v1.2.1`, `v1.2.0`, `v1.1.1`, `v1.1.0`, `v1.0.0`. The v1.4.3 asset is `Fail2Ban_AbuseIPDB-1.4.3.tar.gz`; its SHA-256 is authoritative in [`updater.json`](updater.json), which the updater verifies before running the bundled `install.sh` - never trust a checksum quoted in prose. The repository does not document a manual install from the downloaded archive; the documented consumer of that asset is `abuseipdb-upgrade` ([docs/UPDATE.md](docs/UPDATE.md)). For a first install, pin the verified tag in a checkout:
 
 ```bash
-git clone --branch v1.4.2 --depth 1 https://github.com/paulmann/Fail2Ban_AbuseIPDB.git
+git clone --branch v1.4.3 --depth 1 https://github.com/paulmann/Fail2Ban_AbuseIPDB.git
 cd Fail2Ban_AbuseIPDB
 sudo ./install.sh --api-key "$ABUSEIPDB_API_KEY" --jails "sshd"
 ```
