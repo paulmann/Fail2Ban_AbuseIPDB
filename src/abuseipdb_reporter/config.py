@@ -102,10 +102,15 @@ def _as_timezone(value, default: str = "utc") -> str:
 
 
 def parse_ranges(raw: str) -> Tuple[ipaddress._BaseNetwork, ...]:
-    """Parse a comma/whitespace separated list of CIDR ranges."""
+    """Parse a comma/whitespace separated list of CIDR ranges.
+
+    An inline comment after ``#`` is dropped, so a documented example like
+    ``ranges = 10.0.0.0/8   # office`` does not silently lose the network: the
+    reporter's own parser must accept what the documentation shows.
+    """
     networks: List[ipaddress._BaseNetwork] = []
     for part in str(raw or "").replace("\n", ",").split(","):
-        part = part.strip()
+        part = part.split("#", 1)[0].strip()
         if not part:
             continue
         try:

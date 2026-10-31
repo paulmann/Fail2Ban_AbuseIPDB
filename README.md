@@ -11,7 +11,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20systemd%20%7C%20cron-lightgrey)](#requirements-and-compatibility)
-[![Tests](https://img.shields.io/badge/tests-88%20passing-brightgreen.svg)](tests)
+[![Tests](https://img.shields.io/badge/tests-124%20passing-brightgreen.svg)](tests)
 [![Wiki](https://img.shields.io/badge/wiki-18%20pages-8A2BE2)](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki)
 [![Stars](https://img.shields.io/github/stars/paulmann/Fail2Ban_AbuseIPDB?style=social&label=Stars)](https://github.com/paulmann/Fail2Ban_AbuseIPDB/stargazers)
 
@@ -19,7 +19,7 @@ Fail2Ban knows **who** attacked and **why**. AbuseIPDB wants a short factual rep
 
 This project separates the two paths. The ban stays local and instant. A small SQLite queue stores what happened. A scheduled worker (systemd timer or cron, every 16 minutes) turns the queue into evidence-backed reports, respects AbuseIPDB rate limits, retries failures and never blocks the firewall. The API key lives in its own file, and `abuseipdb-upgrade` updates the installation from GitHub without losing the key, the configuration, the queue or the jail list.
 
-> **Documentation status.** Counts in this README were re-measured from the working tree on 2026-10-31 (v1.2.0): 123 tests, 14 source modules, 74 tracked files, 18 wiki pages. The operator-facing long-form documentation lives in the [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki); the design-level documents live under [`docs/`](docs/).
+> **Documentation status.** Counts in this README were re-measured from the working tree on 2026-10-31 (v1.2.1): 124 tests, 14 source modules, 74 tracked files, 18 wiki pages. The operator-facing long-form documentation lives in the [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki); the design-level documents live under [`docs/`](docs/).
 
 ---
 
@@ -121,23 +121,23 @@ The caveat that matters: the project does not ban better than fail2ban and does 
 | **Safe installer** | Backs up every replaced file, runs `fail2ban-client -t` before restarting, keeps state for a clean uninstall, supports staging with `--root`. |
 | **Self-advertising footer** | Every report ends with a configurable attribution line; disable it with `attribution = no` or replace it with your own. |
 | **Extensible classifiers** | Evidence per service through a registry (`sshd`, FTP, SMTP, mailbox, web, generic fallback): a new jail is one entry, not a patch of the core loop. |
-| **Tested and gated** | 123 unit/integration tests, shellcheck, staged install/uninstall, CI on Python 3.9-3.13, tag-driven release workflow. |
+| **Tested and gated** | 124 unit/integration tests, shellcheck, staged install/uninstall, CI on Python 3.9-3.13, tag-driven release workflow. |
 
 ---
 
 ## By the numbers
 
-Measured from the working tree on 2026-10-31 (v1.2.0):
+Measured from the working tree on 2026-10-31 (v1.2.1):
 
 | Surface | Count | Measured from |
 |---|---|---|
 | Python package modules | **14** files · 2,335 lines | `src/abuseipdb_reporter/*.py` |
-| Tests | **123** passing (1 skipped on Windows only) | `python -m unittest discover -s tests -t .` |
+| Tests | **124** passing (1 skipped on Windows only) | `python -m unittest discover -s tests -t .` |
 | Test code | 14 files · 1,793 lines | `tests/` |
 | Installer and shell tooling | 826 lines | `*.sh` |
 | Documentation pages | 9 | `docs/*.md` |
 | Wiki pages | 18 | `Fail2Ban_AbuseIPDB.wiki` |
-| Tracked files | 66 | `git ls-files` |
+| Tracked files | 74 | `git ls-files` |
 | Runtime dependencies | **0** | `pyproject.toml` (none) |
 | Worker memory | about 13 MB RSS | measured on a production host |
 | Enqueue latency | about 0.1 s | 10 enqueues in 1.06 s, including interpreter start-up |
@@ -486,9 +486,11 @@ manifest_url = https://raw.githubusercontent.com/paulmann/Fail2Ban_AbuseIPDB/mai
 
 [ignore]
 # private, loopback, reserved, your own management networks and CDN ranges
+# (a trailing "# comment" on a value line is dropped by the parser since 1.2.1,
+#  but keeping comments on their own lines is clearer)
 ranges = 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8,
          192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24,
-         203.0.113.10/32   # your management address
+         203.0.113.10/32
 
 [category_map]
 sshd = 18,22
@@ -730,7 +732,7 @@ Start with [Wiki — Getting Started](https://github.com/paulmann/Fail2Ban_Abuse
 ## Development
 
 ```bash
-# 123 unit tests (Python 3.9+, no network, no root)
+# 124 unit tests (Python 3.9+, no network, no root)
 python -m unittest discover -s tests -t .
 
 # end-to-end test: real worker + queue + mock AbuseIPDB API (no external calls)

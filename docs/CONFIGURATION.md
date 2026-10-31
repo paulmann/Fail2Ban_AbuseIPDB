@@ -1,7 +1,10 @@
 # Configuration
 
 The reporter has a single INI file: `/etc/abuseipdb/reporter.conf`.
-It is installed with mode `600` (root only) because it contains the API key.
+It is installed with mode `600` (root only). Since 1.1.0 the API key lives in
+its own file (`api_key_file`), but the configuration stays root-only anyway: it
+may still carry a legacy `api_key` until `--migrate-key` has been run, and it
+names the reporting server and the trusted networks.
 
 `/usr/local/sbin/abuseipdb-report --config /path/to/other.conf` is honoured, as
 is the `ABUSEIPDB_REPORTER_CONFIG` environment variable.
@@ -108,8 +111,9 @@ attribution_text = Reported by ACME edge scanner
 ## `[ignore]`
 
 `ranges` is a comma/whitespace separated list of CIDR ranges that must never be
-reported. The defaults cover private, loopback, link-local, documentation and
-reserved space. **Add your own management addresses and any trusted networks**,
+reported. An inline `# comment` after a value is dropped (since 1.2.1), so the
+documented style below works as written. The defaults cover private, loopback,
+link-local, documentation and reserved space. **Add your own management addresses and any trusted networks**,
 and keep CDN ranges (the example contains Cloudflare's IPv4/IPv6 ranges) if
 sites behind those CDNs are protected by fail2ban - otherwise a banned CDN edge
 address would be reported instead of the real client.
@@ -263,7 +267,7 @@ abuseipdb-report --status
   "stopped": "",
   "today": 42,
   "ts": 1767260400,
-  "version": "1.2.0",
+  "version": "1.2.1",
   "waited_seconds": 2.0
 }
 ```
@@ -280,7 +284,7 @@ abuseipdb_reporter_errors_last_run 0
 abuseipdb_reporter_run_timestamp_seconds 1767260400
 abuseipdb_reporter_run_ok 1
 abuseipdb_reporter_budget_remaining 858
-abuseipdb_reporter_info{version="1.2.0",stopped="",budget_timezone="utc"} 1
+abuseipdb_reporter_info{version="1.2.1",stopped="",budget_timezone="utc"} 1
 ```
 
 Writing status is best effort: an unwritable directory is logged and never turns

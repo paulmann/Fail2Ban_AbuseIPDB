@@ -59,6 +59,15 @@ class ConfigTests(unittest.TestCase):
         networks = parse_ranges("10.0.0.0/8, not-a-network, 192.168.0.0/16")
         self.assertEqual(len(networks), 2)
 
+    def test_parse_ranges_drops_inline_comments(self):
+        networks = parse_ranges(
+            "10.0.0.0/8   # office\n192.168.0.0/16,\n203.0.113.10/32  # mgmt"
+        )
+        self.assertEqual(
+            sorted(str(network) for network in networks),
+            ["10.0.0.0/8", "192.168.0.0/16", "203.0.113.10/32"],
+        )
+
     def test_legacy_api_key_is_still_supported(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "reporter.conf")

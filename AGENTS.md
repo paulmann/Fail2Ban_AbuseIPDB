@@ -1,9 +1,9 @@
-# AGENTS.md — Fail2Ban_AbuseIPDB 1.2.0
+# AGENTS.md — Fail2Ban_AbuseIPDB 1.2.1
 
 Agent-facing guide: how to install Fail2Ban_AbuseIPDB, run it, and report problems responsibly.
 Human documentation: [README.md](README.md), [docs/](docs/), [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki).
 
-> Verified against repository state on 2026-10-31. Version covered: 1.2.0 (tag `v1.2.0`, released 2026-10-31).
+> Verified against repository state on 2026-10-31. Version covered: 1.2.1 (tag `v1.2.1`, released 2026-10-31).
 
 ## 1. What it is
 
@@ -34,10 +34,10 @@ If a check fails, stop and report; do not work around it silently.
 
 ### 3.1 From a release
 
-Releases verified with `gh release list -R paulmann/Fail2Ban_AbuseIPDB`: `v1.2.0` (latest), `v1.1.1`, `v1.1.0`, `v1.0.0`. The v1.2.0 asset is `Fail2Ban_AbuseIPDB-1.2.0.tar.gz`; its SHA-256 is authoritative in [`updater.json`](updater.json), which the updater verifies before running the bundled `install.sh` - never trust a checksum quoted in prose. The repository does not document a manual install from the downloaded archive; the documented consumer of that asset is `abuseipdb-upgrade` ([docs/UPDATE.md](docs/UPDATE.md)). For a first install, pin the verified tag in a checkout:
+Releases verified with `gh release list -R paulmann/Fail2Ban_AbuseIPDB`: `v1.2.1` (latest), `v1.2.0`, `v1.1.1`, `v1.1.0`, `v1.0.0`. The v1.2.1 asset is `Fail2Ban_AbuseIPDB-1.2.1.tar.gz`; its SHA-256 is authoritative in [`updater.json`](updater.json), which the updater verifies before running the bundled `install.sh` - never trust a checksum quoted in prose. The repository does not document a manual install from the downloaded archive; the documented consumer of that asset is `abuseipdb-upgrade` ([docs/UPDATE.md](docs/UPDATE.md)). For a first install, pin the verified tag in a checkout:
 
 ```bash
-git clone --branch v1.2.0 --depth 1 https://github.com/paulmann/Fail2Ban_AbuseIPDB.git
+git clone --branch v1.2.1 --depth 1 https://github.com/paulmann/Fail2Ban_AbuseIPDB.git
 cd Fail2Ban_AbuseIPDB
 sudo ./install.sh --api-key "$ABUSEIPDB_API_KEY" --jails "sshd"
 ```
@@ -185,11 +185,11 @@ The scheduler runs the worker every 16 minutes (systemd timer with `Persistent=t
 - [docs/CONFIGURATION.md](docs/CONFIGURATION.md) - every configuration key, key resolution, rate limits, environment variables.
 - [docs/UPDATE.md](docs/UPDATE.md) - update manifest, `--check`/`--upgrade` semantics, rollback, weekly check.
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - diagnosis recipes used in section 7.
-- `install.sh` (`VERSION="1.2.0"`, `usage()`, exit paths), `config/reporter.conf.example`, `fail2ban/action.d/abuseipdb-async.conf`, `systemd/abuseipdb-report.{service,timer}`, `cron/abuseipdb-reporter`, `logrotate/abuseipdb-reporter` - host changes and defaults.
-- `src/abuseipdb_reporter/{cli,updater,keys,config,enqueue,reporter,api,evidence,comments,db,status,log,iputil}.py`, `pyproject.toml`, `updater.json`, `CHANGELOG.md` - version 1.2.0, flags, exit codes, key resolution order, classifier registry, status document, release asset and checksum.
+- `install.sh` (`VERSION="1.2.1"`, `usage()`, exit paths), `config/reporter.conf.example`, `fail2ban/action.d/abuseipdb-async.conf`, `systemd/abuseipdb-report.{service,timer}`, `cron/abuseipdb-reporter`, `logrotate/abuseipdb-reporter` - host changes and defaults.
+- `src/abuseipdb_reporter/{cli,updater,keys,config,enqueue,reporter,api,evidence,comments,db,status,log,iputil}.py`, `pyproject.toml`, `updater.json`, `CHANGELOG.md` - version 1.2.1, flags, exit codes, key resolution order, classifier registry, status document, release asset and checksum.
 - `.github/workflows/ci.yml` - Python 3.9-3.13 matrix, staged install/uninstall rehearsal.
 - `.github/workflows/release.yml` - tag-driven release: version-consistency gate, tests, `git archive` tarball, wheel and sdist, `gh release create`, checksum in the job summary.
-- Release facts verified with `gh release list -R paulmann/Fail2Ban_AbuseIPDB` and `gh release view v1.2.0 -R paulmann/Fail2Ban_AbuseIPDB`.
+- Release facts verified with `gh release list -R paulmann/Fail2Ban_AbuseIPDB` and `gh release view v1.2.1 -R paulmann/Fail2Ban_AbuseIPDB`.
 - `--check-key` was measured live on this Windows workstation on 2026-10-31 against `api.abuseipdb.com` with an owner-supplied key: `HTTP 200` with an `/api/v2/check` payload (the key itself is not stored in this repository). The installer, systemd units and fail2ban integration were verified by reading the sources and CI configuration only - this machine has no Linux/fail2ban runtime, so they were not executed here.
 
 ---
