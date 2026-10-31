@@ -19,7 +19,7 @@ Fail2Ban knows **who** attacked and **why**. AbuseIPDB wants a short factual rep
 
 This project separates the two paths. The ban stays local and instant. A small SQLite queue stores what happened. A scheduled worker (systemd timer or cron, every 16 minutes) turns the queue into evidence-backed reports, respects AbuseIPDB rate limits, retries failures and never blocks the firewall. The API key lives in its own file, and `abuseipdb-upgrade` updates the installation from GitHub without losing the key, the configuration, the queue or the jail list.
 
-> **Documentation status.** Counts in this README were re-measured from the working tree on 2026-10-31 (v1.2.1): 124 tests, 14 source modules, 74 tracked files, 18 wiki pages. The operator-facing long-form documentation lives in the [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki); the design-level documents live under [`docs/`](docs/).
+> **Documentation status.** Counts in this README were re-measured from the working tree on 2026-10-31 (v1.2.1): 124 tests, 14 source modules, 75 tracked files, 18 wiki pages. The operator-facing long-form documentation lives in the [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki); the design-level documents live under [`docs/`](docs/).
 
 ---
 
@@ -131,13 +131,13 @@ Measured from the working tree on 2026-10-31 (v1.2.1):
 
 | Surface | Count | Measured from |
 |---|---|---|
-| Python package modules | **14** files · 2,335 lines | `src/abuseipdb_reporter/*.py` |
+| Python package modules | **14** files · 2,340 lines | `src/abuseipdb_reporter/*.py` |
 | Tests | **124** passing (1 skipped on Windows only) | `python -m unittest discover -s tests -t .` |
-| Test code | 14 files · 1,793 lines | `tests/` |
-| Installer and shell tooling | 826 lines | `*.sh` |
-| Documentation pages | 9 | `docs/*.md` |
+| Test code | 14 files · 1,802 lines | `tests/` |
+| Installer and shell tooling | 855 lines | `*.sh` + `tests/integration/*.sh` |
+| Documentation pages | 10 · 1,223 lines | `docs/*.md` |
 | Wiki pages | 18 | `Fail2Ban_AbuseIPDB.wiki` |
-| Tracked files | 74 | `git ls-files` |
+| Tracked files | 75 | `git ls-files` |
 | Runtime dependencies | **0** | `pyproject.toml` (none) |
 | Worker memory | about 13 MB RSS | measured on a production host |
 | Enqueue latency | about 0.1 s | 10 enqueues in 1.06 s, including interpreter start-up |
