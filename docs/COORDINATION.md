@@ -80,13 +80,31 @@ Distribution is your business (configuration management, `scp`, a vault). The
 reporter never prints it: `abuseipdb-coord --check` and
 `abuseipdb-report --coord-status` only report `secret: present` or `MISSING`.
 
+Verify that all nodes really share the same value - a mismatch is the most common
+coordination failure:
+
+```bash
+sha256sum /etc/abuseipdb/.coord.secret        # identical on every node
+```
+
 ## Leader setup
 
+Editing `[coordination]` by hand is error-prone: the configuration shipped by the
+installer already contains the section, and a second section makes
+`configparser` fail. Use the helper shipped in the source tree, which rewrites
+exactly the keys you pass, keeps every comment and preserves the 600 mode:
+
+```bash
+sudo python3 tools/set_coordination.py --config /etc/abuseipdb/reporter.conf \
+    --mode leader --node-id edge-1 --bind 0.0.0.0 --port 8765
+```
+
+Then:
 ```bash
 # 1. the leader also reports, so it needs the API key as usual
 sudo /usr/local/sbin/abuseipdb-report --check-key
 
-# 2. edit /etc/abuseipdb/reporter.conf
+# 2. example of the resulting section (written by the helper above)
 #    [coordination]
 #    mode = leader
 #    node_id = edge-1
@@ -112,11 +130,9 @@ endpoint nobody asked for must not open a port. Enable it only on the leader.
 # 1. no API key needed; remove it from the follower if it is there
 sudo /usr/local/sbin/abuseipdb-report --coord-status   # after the config edit
 
-# 2. edit /etc/abuseipdb/reporter.conf
-#    [coordination]
-#    mode = follower
-#    node_id = web-1
-#    leader_url = http://10.0.0.5:8765
+# 2. point this node at the leader (same helper as on the leader)
+sudo python3 tools/set_coordination.py --config /etc/abuseipdb/reporter.conf \
+    --mode follower --node-id web-1 --leader-url http://10.0.0.5:8765
 
 # 3. check the path end to end
 sudo /usr/local/sbin/abuseipdb-report --coord-status   # prints the leader's status
