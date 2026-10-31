@@ -33,11 +33,23 @@ manifest already named the next one.
 
 ### Verified
 
-* Unit tests: the raw→API mapping (nested path, tag ref), API-first order, fallback
-  on `HTTP 403`, one single request for a foreign host, both sources failing with
-  both named in the error, the `Accept` header present only for `api.github.com`.
-* Live: `api.github.com` returned the new manifest while
-  `raw.githubusercontent.com` still served the previous one, on three hosts.
+* Unit tests (193 total): the raw→API mapping (nested path, tag ref), API-first
+  order, fallback on `HTTP 403`, one single request for a foreign host, both
+  sources failing with both named in the error, the `Accept` header present only for
+  `api.github.com`.
+* Live measurement, on a production host, against a scratch branch: the file was
+  changed from `0.0.2` to `0.0.3` and both sources were polled every 15 s for two
+  minutes.
+
+  ```
+  t=  0s  raw=0.0.2  api=0.0.2  via_updater=0.0.2
+  t= 15s  raw=0.0.2  api=0.0.3  via_updater=0.0.3
+  ...
+  t=120s  raw=0.0.2  api=0.0.3  via_updater=0.0.3
+  ```
+
+  `raw` never left the old copy inside that window; the API and the fixed updater
+  saw the new one from the first poll after the push.
 
 ### Upgrade
 
