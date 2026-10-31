@@ -1,11 +1,11 @@
 {
   "name": "Fail2Ban_AbuseIPDB",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "released": "2026-11-01",
   "requires_python": ">=3.9",
-  "tarball": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/download/v1.4.2/Fail2Ban_AbuseIPDB-1.4.2.tar.gz",
-  "sha256": "dc2f226075688b62acbe7e0505181ae32fd3c9b798c8562c5c93a3b423451fc0",
-  "release_notes": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.2",
+  "tarball": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/download/v1.4.3/Fail2Ban_AbuseIPDB-1.4.3.tar.gz",
+  "sha256": "fdea4bd05aa460153156643a72fa4f90251d122c6cea575010cf7c0b0bcad1aa",
+  "release_notes": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.3",
   "changelog": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/blob/main/CHANGELOG.md",
-  "notes": "v1.4.2: PyPI uploads moved into the release workflow with OIDC trusted publishing (no stored token, PEP 740 attestations); no runtime change over 1.4.1, which made the two-way sync jail-aware. Includes 1.4.0 two-way leader/follower sync (bans travel, reports never repeat), 1.3.x coordination for one shared account, status.json and Prometheus metrics, Retry-After and adaptive backoff."
+  "notes": "v1.4.3: the updater bypasses the raw.githubusercontent CDN cache, so a new release is visible immediately instead of up to five minutes later. Includes 1.4.2 (PyPI publishing from CI over OIDC trusted publishing, PEP 740 attestations) and 1.4.x two-way leader/follower sync: bans travel between nodes, reports never repeat."
 }
