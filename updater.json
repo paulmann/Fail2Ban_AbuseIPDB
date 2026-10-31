@@ -1,11 +1,11 @@
 {
   "name": "Fail2Ban_AbuseIPDB",
-  "version": "1.3.0",
-  "released": "2026-10-31",
+  "version": "1.4.0",
+  "released": "2026-11-01",
   "requires_python": ">=3.9",
-  "tarball": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/download/v1.3.0/Fail2Ban_AbuseIPDB-1.3.0.tar.gz",
-  "sha256": "18605435055f06d44f3a0fcea7929a034c15212ec4ae4fb5cd0b0fb65eacbc68",
-  "release_notes": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.3.0",
+  "tarball": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/download/v1.4.0/Fail2Ban_AbuseIPDB-1.4.0.tar.gz",
+  "sha256": "dc16034618e6b58ac0e7ea254eec7218bcc22d38d4d9d748475ec3d2e3eb098d",
+  "release_notes": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.0",
   "changelog": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/blob/main/CHANGELOG.md",
-  "notes": "v1.3.0: optional leader/follower coordination for one shared AbuseIPDB account (abuseipdb-coord, events.pushed migration, --coord-status); includes v1.2.x: status.json and Prometheus metrics, Retry-After and adaptive backoff, UTC budget day, classifier registry, inline comments in [ignore] ranges."
+  "notes": "v1.4.0: two-way leader/follower sync - followers receive the bans they are missing (applied through fail2ban-client) and the addresses the cluster already reported, so no address is ever reported twice; includes v1.3.x: optional coordination for one shared account (abuseipdb-coord, --coord-status), status.json and Prometheus metrics, Retry-After and adaptive backoff, UTC budget day, classifier registry."
 }
