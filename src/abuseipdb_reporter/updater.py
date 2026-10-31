@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -81,12 +82,10 @@ CACHE_BUSTER = "_f2b_nocache"
 def cache_busted(url: str, stamp: Optional[int] = None) -> str:
     """Add a one-shot query parameter to a CDN URL, leave everything else alone.
 
-    ``raw.githubusercontent.com`` answers ``Cache-Control: max-age=300``, so right
-    after a release ``--check`` keeps reading the previous ``updater.json`` for up
-    to five minutes and wrongly reports "you are running the latest version".
-    The CDN keys on the full URL, so a unique query string goes to the origin.
-    Any other host (self-hosted manifest, signed URL) is returned untouched: a
-    stray parameter there could break the signature.
+    Kept for callers that still use it; **not** relied on by the updater. Measured
+    on `raw.githubusercontent.com` after a release: a unique query string still
+    returned the previous file from most edges, so the manifest is now read through
+    :func:`api_equivalent` instead.
     """
     try:
         parts = urllib.parse.urlsplit(url)
@@ -99,13 +98,66 @@ def cache_busted(url: str, stamp: Optional[int] = None) -> str:
     return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
 
 
-def fetch_manifest(url: str, timeout: int = 20, opener: Callable = _urlopen) -> Dict:
-    url = cache_busted(url)
-    try:
-        with opener(url, timeout) as response:
-            payload = response.read().decode("utf-8", "replace")
-    except (urllib.error.URLError, OSError, ValueError) as error:
-        raise UpdateError("cannot fetch update manifest %s: %r" % (url, error))
+def _urlopen(url: str, timeout: int, accept: Optional[str] = None):
+    headers = {"User-Agent": USER_AGENT}
+    if accept:
+        headers["Accept"] = accept
+    request = urllib.request.Request(url, headers=headers)
+    return urllib.request.urlopen(request, timeout=timeout)
+
+
+#: ``raw.githubusercontent.com/<owner>/<repo>/<ref>/<path>``
+GITHUB_RAW_RE = re.compile(
+    r"^https?://raw\.githubusercontent\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/"
+    r"(?P<ref>[^/]+)/(?P<path>.+)$"
+)
+#: Media type that makes the contents API return the file itself, not base64 JSON.
+GITHUB_API_RAW = "application/vnd.github.raw"
+
+
+def api_equivalent(url: str) -> Optional[str]:
+    """Return the GitHub API URL for a raw.githubusercontent.com file, if any.
+
+    ``raw.githubusercontent.com`` sits behind a CDN that answers
+    ``Cache-Control: max-age=300`` and keeps serving the previous file for
+    minutes after a release, so ``--check`` reported "you are running the latest
+    version" while the manifest already named the next one. A query parameter does
+    not help - measured: adding one still returned stale content from most edges.
+    ``api.github.com`` is not cached, so it is tried first and the raw URL stays as
+    the fallback (rate limit, blocked egress, a self-hosted mirror).
+    """
+    match = GITHUB_RAW_RE.match(url or "")
+    if not match:
+        return None
+    parts = match.groupdict()
+    return "https://api.github.com/repos/%s/%s/contents/%s?ref=%s" % (
+        parts["owner"],
+        parts["repo"],
+        parts["path"],
+        parts["ref"],
+    )
+
+
+def _fetch_text(url: str, timeout: int) -> str:
+    accept = GITHUB_API_RAW if (urllib.parse.urlsplit(url).hostname or "").lower() == "api.github.com" else None
+    with _urlopen(url, timeout, accept=accept) as response:
+        return response.read().decode("utf-8", "replace")
+
+
+def fetch_manifest(url: str, timeout: int = 20, opener: Callable = _fetch_text) -> Dict:
+    """Read the update manifest, preferring a source that is not CDN-cached."""
+    candidates = [candidate for candidate in (api_equivalent(url), url) if candidate]
+    payload = ""
+    errors = []
+    for candidate in candidates:
+        try:
+            payload = opener(candidate, timeout)
+            break
+        except (urllib.error.URLError, OSError, ValueError) as error:
+            errors.append("%s: %r" % (candidate, error))
+            payload = ""
+    if not payload:
+        raise UpdateError("cannot fetch update manifest (%s)" % "; ".join(errors or [url]))
     try:
         manifest = json.loads(payload)
     except ValueError as error:

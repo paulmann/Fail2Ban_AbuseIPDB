@@ -235,59 +235,126 @@ class CliTests(unittest.TestCase):
             self.assertEqual(updater.main_upgrade(["--upgrade"]), 1)
 
 
-class CacheBusterTests(unittest.TestCase):
+class ManifestSourceTests(unittest.TestCase):
     """The CDN must never hide a fresh manifest behind a five-minute cache."""
 
-    def test_github_raw_gets_a_query(self):
-        url = "https://raw.githubusercontent.com/o/r/main/updater.json"
-        built = updater.cache_busted(url, stamp=1767225600)
-        self.assertTrue(built.startswith(url + "?_f2b_nocache="))
-        self.assertTrue(built.endswith("1767225600"))
+    RAW = "https://raw.githubusercontent.com/paulmann/Fail2Ban_AbuseIPDB/main/updater.json"
+    API = (
+        "https://api.github.com/repos/paulmann/Fail2Ban_AbuseIPDB/contents/updater.json?ref=main"
+    )
 
-    def test_existing_query_is_kept(self):
-        url = "https://raw.githubusercontent.com/o/r/main/updater.json?ref=main"
-        built = updater.cache_busted(url, stamp=5)
-        self.assertIn("ref=main", built)
-        self.assertIn("_f2b_nocache=5", built)
-        self.assertEqual(built.count("?"), 1)
+    def test_raw_url_maps_to_the_api(self):
+        self.assertEqual(updater.api_equivalent(self.RAW), self.API)
 
-    def test_other_hosts_are_untouched(self):
+    def test_nested_path_is_preserved(self):
+        url = "https://raw.githubusercontent.com/o/r/v1.2.3/docs/updater.json"
+        self.assertEqual(
+            updater.api_equivalent(url),
+            "https://api.github.com/repos/o/r/contents/docs/updater.json?ref=v1.2.3",
+        )
+
+    def test_other_hosts_have_no_api_equivalent(self):
         for url in (
             "https://example.com/updater.json",
             "https://updates.example.com/x/updater.json?sig=abc",
             "http://127.0.0.1:8000/updater.json",
+            "",
+            None,
         ):
-            self.assertEqual(updater.cache_busted(url, stamp=5), url)
+            self.assertIsNone(updater.api_equivalent(url))
 
-    def test_cache_buster_is_unique_per_call(self):
-        url = "https://raw.githubusercontent.com/o/r/main/updater.json"
-        self.assertNotEqual(updater.cache_busted(url, stamp=1), updater.cache_busted(url, stamp=2))
-
-    def test_manifest_fetch_uses_the_busted_url(self):
+    def test_api_equivalent_is_fetched_first(self):
         seen = []
-
-        class Response:
-            def __init__(self, payload):
-                self.payload = payload
-
-            def read(self):
-                return self.payload
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *exc):
-                return False
 
         def opener(url, timeout):
             seen.append(url)
-            return Response(b'{"version": "1.4.3", "tarball": "x", "sha256": "y"}')
+            return '{"version": "1.4.4", "tarball": "x", "sha256": "y"}'
 
-        manifest = updater.fetch_manifest(
-            "https://raw.githubusercontent.com/o/r/main/updater.json", opener=opener
-        )
-        self.assertEqual(manifest["version"], "1.4.3")
-        self.assertIn("_f2b_nocache=", seen[0])
+        manifest = updater.fetch_manifest(self.RAW, opener=opener)
+        self.assertEqual(manifest["version"], "1.4.4")
+        self.assertEqual(seen, [self.API])
+
+    def test_raw_url_is_the_fallback(self):
+        seen = []
+
+        def opener(url, timeout):
+            seen.append(url)
+            if "api.github.com" in url:
+                raise updater.urllib.error.HTTPError(url, 403, "rate limited", {}, None)
+            return '{"version": "1.4.4", "tarball": "x", "sha256": "y"}'
+
+        manifest = updater.fetch_manifest(self.RAW, opener=opener)
+        self.assertEqual(manifest["version"], "1.4.4")
+        self.assertEqual(seen, [self.API, self.RAW])
+
+    def test_a_non_github_url_is_requested_once(self):
+        seen = []
+
+        def opener(url, timeout):
+            seen.append(url)
+            return '{"version": "9.9.9", "tarball": "x", "sha256": "y"}'
+
+        manifest = updater.fetch_manifest("https://example.com/updater.json", opener=opener)
+        self.assertEqual(manifest["version"], "9.9.9")
+        self.assertEqual(seen, ["https://example.com/updater.json"])
+
+    def test_both_sources_failing_reports_both(self):
+        def opener(url, timeout):
+            raise OSError("network down")
+
+        with self.assertRaises(updater.UpdateError) as caught:
+            updater.fetch_manifest(self.RAW, opener=opener)
+        message = str(caught.exception)
+        self.assertIn("api.github.com", message)
+        self.assertIn("raw.githubusercontent.com", message)
+
+    def test_manifest_without_version_is_rejected(self):
+        def opener(url, timeout):
+            return '{"tarball": "x"}'
+
+        with self.assertRaises(updater.UpdateError):
+            updater.fetch_manifest(self.RAW, opener=opener)
+
+    def test_invalid_json_is_rejected(self):
+        def opener(url, timeout):
+            return "not json"
+
+        with self.assertRaises(updater.UpdateError):
+            updater.fetch_manifest(self.RAW, opener=opener)
+
+    def test_api_host_gets_the_raw_media_type(self):
+        import urllib.request
+
+        captured = {}
+
+        def fake_urlopen(request, timeout):
+            captured["headers"] = {k.lower(): v for k, v in request.header_items()}
+            captured["url"] = request.full_url
+
+            class Response:
+                def read(self):
+                    return b'{"version": "1.4.4"}'
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+            return Response()
+
+        original = urllib.request.urlopen
+        urllib.request.urlopen = fake_urlopen
+        try:
+            updater._fetch_text(self.API, 5)
+            api_headers = dict(captured["headers"])
+            updater._fetch_text(self.RAW, 5)
+        finally:
+            urllib.request.urlopen = original
+
+        self.assertEqual(api_headers.get("accept"), "application/vnd.github.raw")
+        self.assertNotIn("accept", captured["headers"])  # the raw URL keeps the plain request
+        self.assertEqual(captured["url"], self.RAW)
 
 
 if __name__ == "__main__":

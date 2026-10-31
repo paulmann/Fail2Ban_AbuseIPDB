@@ -4,6 +4,29 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.4] - 2026-11-01
+
+### Fixed
+
+* **The 1.4.3 fix did not work, and this one does.** Measured after 1.4.3:
+  `raw.githubusercontent.com` still served the previous `updater.json` when the URL
+  carried a unique query parameter - repeated probes returned the old file from
+  most edges, so `--check` could still claim "you are running the latest version"
+  right after a release. The manifest is now read from
+  `https://api.github.com/repos/<owner>/<repo>/contents/<path>?ref=<ref>` (media
+  type `application/vnd.github.raw`), which is not CDN-cached, and the configured
+  `raw.githubusercontent.com` URL stays as the **fallback** for a rate limit, a
+  blocked egress or a non-GitHub mirror. A host with a custom `[update]
+  manifest_url` is requested exactly as configured - one URL, no rewriting.
+
+### Changed
+
+* `cache_busted()` is kept but documented as measured-ineffective; nothing in the
+  updater relies on it any more.
+* Tests: **193** (was 188): the raw→API mapping (including nested paths and a tag
+  ref), API-first order, raw fallback on HTTP 403, a single request for a foreign
+  host, both sources failing, and the `Accept` header only for `api.github.com`.
+
 ## [1.4.3] - 2026-11-01
 
 ### Fixed
@@ -286,3 +309,4 @@ release ships the build pipeline, not new behaviour.
 [1.4.1]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.1
 [1.4.2]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.2
 [1.4.3]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.3
+[1.4.4]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.4
