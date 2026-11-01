@@ -151,22 +151,28 @@ the parent follows the worst child.
 
 ## Measured rollout (2026-11-01)
 
-Three servers, module 1.5.2, Zabbix 8.0.0:
+Three servers, module 1.6.1 (22 items, 9 triggers), Zabbix 8.0.0:
 
 | Host | Agent | Items supported | Notes |
 |---|---|---|---|
-| `vps-176-99-5-35` | agent 1 (`zabbix_agentd`, source build) | 21 / 21 | include dir `/etc/zabbix/zabbix_agentd.d` |
-| `hp-debian` (192.168.31.31) | agent 1 (source build, `/usr/local`) | 21 / 21 | include dir `/usr/local/etc/zabbix_agentd.conf.d` |
-| `vpn-exit-de-web` (199.195.197.95) | agent 2 (package) | 21 / 21 | include dir `/etc/zabbix/zabbix_agent2.d` |
+| `vps-176-99-5-35` | agent 1 (`zabbix_agentd`, source build) | 22 / 22 | include dir `/etc/zabbix/zabbix_agentd.d` |
+| `hp-debian` (192.168.31.31) | agent 1 (source build, `/usr/local`) | 22 / 22 | include dir `/usr/local/etc/zabbix_agentd.conf.d` |
+| `vpn-exit-de-web` (199.195.197.95) | agent 2 (package) | 22 / 22 | include dir `/etc/zabbix/zabbix_agent2.d` |
 
-Every item answers `state=0`; the service tree shows the parent plus three children,
-all OK. Two findings from the rollout, both fixed in 1.5.2:
+88 items in the API (22 per host plus 22 in the template), all `state=0`; the service
+tree shows the parent plus three children, all OK; the crawler trigger is present on
+every host and not firing (`last_run_crawlers_skipped = 0`).
 
-* nine items answered `unknown metric`: the snapshot stores `accepted_total`, the
-  agent asked for `coord_accepted_total` (the Prometheus name). `--metric` now
-  accepts both spellings, and a test resolves every generated item name.
-* the agent could not run the CLI at all until the sudo rule included `--metric *`;
-  `UserParameter` now uses `sudo -n` and the snapshot stays `0600 root:root`.
+Three findings from the rollout, each fixed in the version named:
+
+* nine items answered `unknown metric` (1.5.2): the snapshot stores `accepted_total`,
+  the agent asked for `coord_accepted_total`. `--metric` accepts both spellings now, and
+  a test resolves every generated item name against a real snapshot.
+* the agent could not run the CLI at all until the sudo rule covered `--metric *`
+  (1.5.2); `UserParameter` uses `sudo -n` and the snapshot stays `0600 root:root`.
+* an item answered `unknown metric` for a whole timer interval after an upgrade (1.6.1):
+  the metrics file was written by the previous build and lacked the new key. `--metric`
+  now computes a live snapshot when the file does not have the key.
 
 ## Troubleshooting
 
