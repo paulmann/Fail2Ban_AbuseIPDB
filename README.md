@@ -777,6 +777,8 @@ Windows and macOS are not supported for deployment (the fail2ban action and the 
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | ban path, report path, queue schema, evidence, classifiers, status file, key file, updater |
 | [`docs/COORDINATION.md`](docs/COORDINATION.md) | leader/follower roles for one shared AbuseIPDB account: setup, security, failover |
 | [`docs/UPDATE.md`](docs/UPDATE.md) | manifest format, self-update steps, safety rules, rollback |
+| [`docs/ZABBIX.md`](docs/ZABBIX.md) | the Zabbix module: 22 items, 9 triggers, agent key, service tree, the drill, measured rollout |
+| [`docs/GOOD-BOTS.md`](docs/GOOD-BOTS.md) | good bots: measured crawler status, the never-report rail, the firewall ranges |
 | [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | diagnosis → action → verification recipes |
 | [`docs/RELEASING.md`](docs/RELEASING.md) | maintainer release path: version bump, tag, CI publish to PyPI over OIDC trusted publishing, updater.json |
 | [`CHANGELOG.md`](CHANGELOG.md) | release history |
