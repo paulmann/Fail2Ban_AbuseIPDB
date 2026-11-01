@@ -11,7 +11,7 @@ zabbix_export:
       name: 'Fail2Ban AbuseIPDB reporter'
       vendor:
         name: paulmann/Fail2Ban_AbuseIPDB
-        version: '1.6.0'
+        version: '1.6.1'
       description: |
         Fail2Ban -> AbuseIPDB reporter: queue, budget, cluster role and failover lease.
         

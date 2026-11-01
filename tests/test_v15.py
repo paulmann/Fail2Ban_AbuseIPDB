@@ -156,6 +156,21 @@ class MetricNameTests(TempDirTestCase):
 
         self.assertIsNone(cli.monitoring_value(self.cfg, "no_such_metric"))
 
+    def test_a_key_missing_from_the_file_is_computed_live(self):
+        """An older metrics.json must not leave an item unsupported after an upgrade."""
+        import json
+
+        from abuseipdb_reporter import cli
+
+        stale = os.path.join(self.tmp, "metrics.json")
+        with open(stale, "w", encoding="utf-8") as handle:
+            json.dump({"ts": int(time.time()), "pending_events": 3}, handle)
+        self.cfg.metrics_json_path = stale
+        # present in the file
+        self.assertEqual(cli.monitoring_value(self.cfg, "pending_events"), 3)
+        # absent from the file, still answerable from a live snapshot
+        self.assertIsNotNone(cli.monitoring_value(self.cfg, "last_run_crawlers_skipped"))
+
     def test_cli_prints_every_item_name_of_the_template(self):
         from abuseipdb_reporter import cli
 

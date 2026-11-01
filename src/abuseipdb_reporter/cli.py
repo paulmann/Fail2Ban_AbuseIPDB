@@ -125,12 +125,18 @@ def monitoring_value(cfg: Config, name: str):
     has never reported - the snapshot is computed live so the item answers with
     zeros instead of "unsupported".
     """
-    snapshot = metrics.read_snapshot(getattr(cfg, "metrics_json_path", "") or "")
-    if not snapshot:
-        snapshot = metrics.build(cfg, status_path=getattr(cfg, "status_path", ""))
+    from_file = metrics.read_snapshot(getattr(cfg, "metrics_json_path", "") or "")
     for candidate in metrics.name_candidates(name):
-        if candidate in snapshot:
-            value = snapshot[candidate]
+        if candidate in from_file:
+            value = from_file[candidate]
+            return 1 if isinstance(value, bool) else value
+    # The file may predate this build - a key added by an upgrade is missing until the
+    # next run.  Compute the snapshot instead of answering "unknown metric": the item
+    # would otherwise stay unsupported for a whole timer interval after every upgrade.
+    live = metrics.build(cfg, status_path=getattr(cfg, "status_path", ""))
+    for candidate in metrics.name_candidates(name):
+        if candidate in live:
+            value = live[candidate]
             return 1 if isinstance(value, bool) else value
     return None
 

@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.6.1] - 2026-11-01
+
+### Fixed
+
+* **`--metric` answered `unknown metric` for keys added by an upgrade.** The value is
+  read from `metrics.json`, and a file written by the previous version does not carry
+  the new key, so `last_run_crawlers_skipped` stayed unsupported until the next run -
+  a whole timer interval, on every host, after every release that adds a metric. When
+  the file lacks the key, the snapshot is now computed live instead. Test included:
+  a stale file answering an old key must not hide a new one.
+
+Tests: **250**.
+
 ## [1.6.0] - 2026-11-01
 
 ### Added
@@ -443,3 +456,4 @@ release ships the build pipeline, not new behaviour.
 [1.5.2]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.5.2
 [1.5.3]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.5.3
 [1.6.0]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.6.0
+[1.6.1]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.6.1
