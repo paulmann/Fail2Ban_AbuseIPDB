@@ -1,11 +1,11 @@
 {
   "name": "Fail2Ban_AbuseIPDB",
-  "version": "1.5.3",
+  "version": "1.6.0",
   "released": "2026-11-01",
   "requires_python": ">=3.9",
-  "tarball": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/download/v1.5.3/Fail2Ban_AbuseIPDB-1.5.3.tar.gz",
-  "sha256": "fb5b1036ab80419f273c58cbbbd08662722f6973bdb85f0e60d7cde7b79a74fd",
-  "release_notes": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.5.3",
+  "tarball": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/download/v1.6.0/Fail2Ban_AbuseIPDB-1.6.0.tar.gz",
+  "sha256": "a0bbc551cf5bde3dca18b1bea02ee9ecfb2591ed7f31939dad7c6a8ce995cc3d",
+  "release_notes": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.6.0",
   "changelog": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/blob/main/CHANGELOG.md",
-  "notes": "v1.5.3: optional automatic failover with a witness arbiter (health endpoint included), TLS for the coordinator from the standard library, Prometheus and JSON snapshots (--metrics, --metric), a ready Zabbix 8.0 module (21 items, 8 triggers, per-server services), retries with backoff for follower syncs, and two end-to-end checks that can fail: tools/verify-failover-tls.sh and tools/zabbix-drill.ps1."
+  "notes": "v1.6.0: a crawler rail - an address in a published crawler range (Google, OpenAI) or verified by reverse DNS with forward confirmation (Bing, Yandex, Apple, Amazon, Common Crawl, ByteDance, Perplexity) is never reported; a ban can be lifted, an AbuseIPDB report cannot be deleted. Includes 1.5.x: witness failover arbiter, TLS, health endpoint, metrics and a ready Zabbix module."
 }
