@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.5.2] - 2026-11-01
+
+### Fixed
+
+* **`--metric` rejected nine of the twenty-one names the Zabbix template uses.**
+  The snapshot stores short keys (`accepted_total`) while a monitoring agent asks
+  with the Prometheus name (`coord_accepted_total`), so those items answered
+  `unknown metric`. `metrics.name_candidates()` now accepts both spellings, and a
+  test resolves every item name of the generated template against a real snapshot -
+  the check that would have caught this before the rollout.
+
+No other change: the template, the agent key and the coordinator behave as in 1.5.1.
+
 ## [1.5.1] - 2026-11-01
 
 ### Fixed
@@ -366,3 +379,4 @@ release ships the build pipeline, not new behaviour.
 [1.4.4]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.4
 [1.5.0]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.5.0
 [1.5.1]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.5.1
+[1.5.2]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.5.2

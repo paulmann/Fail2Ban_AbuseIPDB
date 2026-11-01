@@ -219,19 +219,22 @@ def render_template(version: str = "") -> str:
 
 
 def render_userparameter() -> str:
-    return """# Fail2Ban_AbuseIPDB -> Zabbix agent 2
+    return """# Fail2Ban_AbuseIPDB -> Zabbix agent (1 or 2)
 #
-# Install as /etc/zabbix/zabbix_agent2.d/userparameter_fail2ban_abuseipdb.conf
-# then restart the agent: systemctl restart zabbix-agent2
+# Install into the include directory of the agent that listens on port 10050:
+#   agent 2 (Debian/Ubuntu package): /etc/zabbix/zabbix_agent2.d/
+#   agent 1 (/etc/zabbix/zabbix_agentd.conf): /etc/zabbix/zabbix_agentd.d/
+#   agent 1 built from source: also /etc/zabbix/zabbix_agentd.d/ (see :env include)
+# then restart the agent: systemctl restart zabbix-agent2|zabbix-agent
 #
-# One key, one number: the CLI reads the JSON snapshot the reporter writes after
-# every run, so a poll costs one file read and every item sees the same run.
+# One key, one number: the CLI prints a value out of the snapshot the reporter
+# writes after every run, so a poll costs one command and every item sees the same
+# run.
 #
-# The agent runs the command as the `zabbix` user. Either make the snapshot
-# readable for that user (docs/ZABBIX.md, section "Permissions"), or install
-# monitoring/zabbix/abuseipdb-metrics-sudoers and prefix the command with sudo:
-#   UserParameter=fail2ban.abuseipdb.metric[*],sudo /usr/local/sbin/abuseipdb-report --metric $1
-UserParameter=fail2ban.abuseipdb.metric[*],/usr/local/sbin/abuseipdb-report --metric $1 2>/dev/null || echo "unsupported"
+# The snapshot is 0600 root:root by design (it lives next to the queue), so the
+# agent needs the narrow sudo rule from monitoring/zabbix/abuseipdb-metrics-sudoers.
+# Without sudo the item is unsupported - visible, not silently zero.
+UserParameter=fail2ban.abuseipdb.metric[*],sudo -n /usr/local/sbin/abuseipdb-report --metric $1 2>/dev/null || echo "unsupported"
 """
 
 
@@ -239,6 +242,7 @@ def render_sudoers() -> str:
     return """# /etc/sudoers.d/zabbix-abuseipdb   (mode 0440, owner root:root)
 # Only needed when the agent should ask the CLI directly instead of reading the
 # metrics file, for example when /var/lib/abuseipdb stays 0600 root:root.
+zabbix ALL=(root) NOPASSWD: /usr/local/sbin/abuseipdb-report --metric *
 zabbix ALL=(root) NOPASSWD: /usr/local/sbin/abuseipdb-report --metrics
 zabbix ALL=(root) NOPASSWD: /usr/local/sbin/abuseipdb-report --stats
 """

@@ -124,22 +124,14 @@ def monitoring_value(cfg: Config, name: str):
     has never reported - the snapshot is computed live so the item answers with
     zeros instead of "unsupported".
     """
-    key = str(name or "").strip()
     snapshot = metrics.read_snapshot(getattr(cfg, "metrics_json_path", "") or "")
     if not snapshot:
         snapshot = metrics.build(cfg, status_path=getattr(cfg, "status_path", ""))
-    if key in snapshot:
-        return snapshot[key]
-    # accept the Prometheus name too: abuseipdb_reporter_pending_events
-    prefix = metrics.PREFIX + "_"
-    if key.startswith(prefix):
-        key = key[len(prefix):]
-    value = snapshot.get(key)
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return 1 if value else 0
-    return value
+    for candidate in metrics.name_candidates(name):
+        if candidate in snapshot:
+            value = snapshot[candidate]
+            return 1 if isinstance(value, bool) else value
+    return None
 
 
 def _coord_status(cfg: Config) -> int:

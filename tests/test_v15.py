@@ -118,6 +118,62 @@ class MetricsTests(TempDirTestCase):
             conn.close()
 
 
+class MetricNameTests(TempDirTestCase):
+    """Every name the Zabbix template uses must resolve in the snapshot."""
+
+    def test_prometheus_names_resolve(self):
+        snapshot = metrics.build(self.cfg, now=int(time.time()))
+        for name in (
+            "pending_events",
+            "coord_accepted_total",
+            "coord_rejected_total",
+            "coord_remote_bans_total",
+            "coord_sync_failures",
+            "coord_cursor_lag_seconds",
+            "coord_last_sync_age_seconds",
+            "last_run_age_seconds",
+            "lease_held",
+        ):
+            candidates = metrics.name_candidates(name)
+            self.assertTrue(
+                any(candidate in snapshot for candidate in candidates),
+                "%s -> %s" % (name, candidates),
+            )
+
+    def test_prefixed_and_plain_forms_agree(self):
+        self.assertEqual(
+            metrics.name_candidates("abuseipdb_reporter_pending_events"),
+            ["abuseipdb_reporter_pending_events", "pending_events"],
+        )
+        self.assertEqual(
+            metrics.name_candidates("coord_accepted_total"),
+            ["coord_accepted_total", "accepted_total"],
+        )
+        self.assertEqual(metrics.name_candidates("enabled"), ["enabled"])
+
+    def test_unknown_name_is_rejected_by_the_cli(self):
+        from abuseipdb_reporter import cli
+
+        self.assertIsNone(cli.monitoring_value(self.cfg, "no_such_metric"))
+
+    def test_cli_prints_every_item_name_of_the_template(self):
+        from abuseipdb_reporter import cli
+
+        import re
+
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "monitoring",
+            "zabbix",
+            "fail2ban_abuseipdb.yaml",
+        )
+        with open(path, "r", encoding="utf-8") as handle:
+            names = re.findall(r"key: 'fail2ban\.abuseipdb\.metric\[([a-z_]+)\]'", handle.read())
+        self.assertEqual(len(names), 21)
+        for name in names:
+            self.assertIsNotNone(cli.monitoring_value(self.cfg, name), name)
+
+
 class RetryTests(TempDirTestCase):
     def setUp(self):
         super().setUp()

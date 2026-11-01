@@ -18,7 +18,7 @@ import datetime
 import json
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from . import __version__, coordination, db
 
@@ -57,6 +57,32 @@ def read_last_run(path: str) -> Dict[str, Any]:
     except (OSError, ValueError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+#: Prefixes stripped when a caller uses the Prometheus name instead of the key.
+NAME_PREFIXES = (PREFIX + "_", "coord_")
+
+
+def name_candidates(name: str) -> List[str]:
+    """All snapshot keys one metric name may mean, most specific first.
+
+    Monitoring agents speak the Prometheus name (``coord_accepted_total``), the
+    snapshot stores the shorter key (``accepted_total``).  Accepting both here keeps
+    the two spellings from drifting apart - a mismatch used to answer "unknown
+    metric" for nine of the twenty-one items.
+    """
+    text = str(name or "").strip()
+    found: List[str] = []
+
+    def push(value: str) -> None:
+        if value and value not in found:
+            found.append(value)
+
+    push(text)
+    for prefix in NAME_PREFIXES:
+        if text.startswith(prefix):
+            push(text[len(prefix):])
+    return found
 
 
 def read_snapshot(path: str) -> Dict[str, Any]:
