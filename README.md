@@ -339,7 +339,8 @@ This is the mode the CI uses to test install, reinstall (key and jail preservati
 | No manual failover | `mode = auto` + `failover = witness`: a small arbiter grants a time-limited lease, so exactly one node reports | [docs/COORDINATION.md](docs/COORDINATION.md) |
 | Encrypted coordinator | `tls_cert`/`tls_key` and mutual TLS from the standard library, or nginx/Caddy in front | [docs/COORDINATION.md](docs/COORDINATION.md) |
 | Monitoring | `--metrics` (Prometheus), `--metric <name>` (one value), `metrics.json`, `GET /v1/health` | [docs/ZABBIX.md](docs/ZABBIX.md) |
-| Zabbix | ready template: 21 items, 8 triggers, per-server services | [monitoring/zabbix](monitoring/zabbix) |
+| Zabbix | ready template: 22 items, 9 triggers, per-server services | [monitoring/zabbix](monitoring/zabbix) |
+| Good bots | search engines and AI crawlers are never banned or reported; measured and enforced | [docs/GOOD-BOTS.md](docs/GOOD-BOTS.md) |
 
 ## First steps
 

@@ -169,7 +169,7 @@ class MetricNameTests(TempDirTestCase):
         )
         with open(path, "r", encoding="utf-8") as handle:
             names = re.findall(r"key: 'fail2ban\.abuseipdb\.metric\[([a-z_]+)\]'", handle.read())
-        self.assertEqual(len(names), 21)
+        self.assertEqual(len(names), 22)
         for name in names:
             self.assertIsNotNone(cli.monitoring_value(self.cfg, name), name)
 

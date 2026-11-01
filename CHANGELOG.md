@@ -4,6 +4,35 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+* **A crawler rail: a good bot is never reported.** Before a report is built, the
+  address is checked against the publishers' own machine-readable lists (Google 317
+  ranges, GPTBot 18, OAI-SearchBot 39, ChatGPT-User 235 - generated into
+  `crawler_ranges.py` with each list's `creationTime`) and, in addition, by reverse
+  DNS with forward confirmation for Bing, Yandex, Apple, Amazon, Common Crawl,
+  ByteDance and Perplexity. A match means no API call: the event is finished locally,
+  the skip is counted, logged and exported. A ban can be lifted; an AbuseIPDB report
+  cannot be deleted.
+* New keys `[report] never_report_crawlers` (default `yes`), `crawler_rdns`
+  (default `yes`), `crawler_rdns_timeout`; new CLI `--crawler-status` and
+  `--crawler-check IP`; new metric `last_run_crawlers_skipped` and a Zabbix item and
+  trigger for it ("a crawler was banned" - it means a jail rule is wrong).
+* `tools/update_crawler_ranges.py` regenerates the range module and records the
+  publisher's own `creationTime`, so the age of every list is visible;
+  `tools/audit-good-bots.sh` is a read-only audit of a host: jails, crawler check for
+  every banned address, ignoreip coverage, per-bot status matrix over the access logs
+  and any nginx rule that can target a crawler.
+* `docs/GOOD-BOTS.md` - the measured answer for the three production hosts.
+
+### Measured on the estate (2026-11-01, 7 days)
+
+5,646 crawler requests across the three hosts (5,404 + 228 + 14), **0 x 403 and 0 x 429**; no banned
+address reverse-resolves to a crawler. 39 x 503 came from `limit_req`, which is
+throttling, not a ban.
+
 ## [1.5.3] - 2026-11-01
 
 ### Added

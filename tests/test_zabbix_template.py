@@ -37,8 +37,8 @@ class GeneratorTests(unittest.TestCase):
         self.assertIn("zabbix_export:", text)
         self.assertIn("version: '8.0'", text)
         self.assertIn("template: Fail2Ban AbuseIPDB reporter", text)
-        self.assertEqual(text.count("key: 'fail2ban.abuseipdb.metric["), 21)
-        self.assertEqual(text.count("expression: last(/Fail2Ban AbuseIPDB reporter/"), 8)
+        self.assertEqual(text.count("key: 'fail2ban.abuseipdb.metric["), 22)
+        self.assertEqual(text.count("expression: last(/Fail2Ban AbuseIPDB reporter/"), 9)
         self.assertEqual(text.count("- macro: '{$ABUSEIPDB."), 3)
         self.assertNotIn("type: PROMETHEUS_PATTERN", text)  # no server-side parsing
         self.assertNotIn("\n          preprocessing:", text)

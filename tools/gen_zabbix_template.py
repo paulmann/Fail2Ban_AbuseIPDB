@@ -57,6 +57,8 @@ NUMBER_ITEMS = [
     ("Last run sent", "last_run_sent", 3, "", "Reports accepted during the last run."),
     ("Last run skipped", "last_run_skipped", 3, "", "Addresses skipped during the last run."),
     ("Last run errors", "last_run_errors", 3, "", "Errors during the last run."),
+    ("Crawlers skipped", "last_run_crawlers_skipped", 3, "",
+     "Addresses not reported because they are published/verified crawlers."),
     ("Sync cursor lag", "coord_cursor_lag_seconds", 0, "s",
      "Follower: seconds since the leader cursor was refreshed."),
     ("Last sync age", "coord_last_sync_age_seconds", 0, "s",
@@ -83,6 +85,9 @@ TRIGGERS = [
      "The timer or cron job stopped running: bans are queued but never reported."),
     ("last_run_errors", "Fail2Ban AbuseIPDB: last run had errors", ">", "0", 1,
      "Transient API or payload errors; a single occurrence is often a 429."),
+    ("last_run_crawlers_skipped", "Fail2Ban AbuseIPDB: a crawler was banned", ">", "0", 2,
+     "A fail2ban rule banned a search/LLM crawler; the report was withheld. Fix the jail "
+     "- a good bot must not be banned at all."),
     ("pending_events", "Fail2Ban AbuseIPDB: queue is growing", ">",
      "{$ABUSEIPDB.PENDING.MAX}", 2,
      "Pending events keep growing: check the budget, the key and the log."),

@@ -54,6 +54,16 @@ skip_jails = recidive
 # Prometheus textfile with the full snapshot; also printed by --metrics.
 metrics_textfile = /var/lib/abuseipdb/metrics.prom
 
+# A ban can be lifted; an AbuseIPDB report cannot be deleted. Keep this on: an
+# address in a published crawler range (Google, OpenAI) or one whose reverse DNS,
+# confirmed forward, says Googlebot/Bingbot/Yandex/Applebot/Amazonbot/CCBot is never
+# reported. Every skip is counted, logged and exported as a metric.
+never_report_crawlers = yes
+# Also confirm by reverse DNS (needs working DNS at report time, one lookup per new
+# address, cached for the run).
+crawler_rdns = yes
+crawler_rdns_timeout = 2.0
+
 [database]
 # Local queue and report journal (SQLite, WAL).
 path = /var/lib/abuseipdb/abuseipdb.sqlite3

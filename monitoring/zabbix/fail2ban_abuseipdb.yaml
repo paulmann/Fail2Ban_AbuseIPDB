@@ -156,6 +156,24 @@ zabbix_export:
                   value: '{HOST.HOST}'
                 - tag: service
                   value: fail2ban-abuseipdb
+        - uuid: 11f58890b98a4f6bbeddabf4e45ab19e
+          name: 'Crawlers skipped'
+          key: 'fail2ban.abuseipdb.metric[last_run_crawlers_skipped]'
+          delay: 5m
+          history: 7d
+          trends: 90d
+          description: 'Addresses not reported because they are published/verified crawlers.'
+          triggers:
+            - uuid: b882bf450c894290bdd4133bbb0837f0
+              expression: last(/Fail2Ban AbuseIPDB reporter/fail2ban.abuseipdb.metric[last_run_crawlers_skipped])>0
+              name: 'Fail2Ban AbuseIPDB: a crawler was banned'
+              priority: WARNING
+              description: 'A fail2ban rule banned a search/LLM crawler; the report was withheld. Fix the jail - a good bot must not be banned at all.'
+              tags:
+                - tag: server
+                  value: '{HOST.HOST}'
+                - tag: service
+                  value: fail2ban-abuseipdb
         - uuid: c2a98c775e0246559d99d96b366b4e01
           name: 'Sync cursor lag'
           key: 'fail2ban.abuseipdb.metric[coord_cursor_lag_seconds]'

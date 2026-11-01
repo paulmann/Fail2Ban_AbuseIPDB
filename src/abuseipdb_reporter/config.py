@@ -166,6 +166,14 @@ class Config:
     server_ip: str = ""
     hostname: str = ""
     attribution: bool = True
+    #: Never report an address that belongs to a published crawler network or whose
+    #: reverse DNS (with forward confirmation) says it is a search/LLM crawler.
+    #: A ban is reversible, an AbuseIPDB report is not - the API has no delete.
+    never_report_crawlers: bool = True
+    #: Confirm crawlers by reverse DNS in addition to the published ranges.
+    crawler_rdns: bool = True
+    #: Per-lookup DNS timeout, seconds.
+    crawler_rdns_timeout: float = 2.0
     attribution_text: str = DEFAULT_ATTRIBUTION
     log_path: str = DEFAULT_LOG_PATH
     #: Coordination role and its settings (see docs/COORDINATION.md).
@@ -282,6 +290,11 @@ def load_config(path: Optional[str] = None, quiet: bool = False) -> Config:
         server_ip=get("report", "server_ip", "").strip(),
         hostname=get("report", "hostname", "").strip(),
         attribution=_as_bool(get("report", "attribution", "yes"), True),
+        never_report_crawlers=_as_bool(get("report", "never_report_crawlers", "yes"), True),
+        crawler_rdns=_as_bool(get("report", "crawler_rdns", "yes"), True),
+        crawler_rdns_timeout=max(
+            0.2, _as_float(get("report", "crawler_rdns_timeout", "2.0"), 2.0)
+        ),
         attribution_text=get("report", "attribution_text", DEFAULT_ATTRIBUTION).strip()
         or DEFAULT_ATTRIBUTION,
         log_path=get("logging", "path", DEFAULT_LOG_PATH).strip() or DEFAULT_LOG_PATH,

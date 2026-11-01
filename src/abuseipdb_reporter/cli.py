@@ -17,6 +17,7 @@ from . import (
     keys,
     log,
     metrics,
+    crawlers,
     reporter,
     status,
     witness,
@@ -278,6 +279,17 @@ def main_report(argv: Optional[List[str]] = None) -> int:
         help="print a Prometheus snapshot of the queue, the cluster role and the last run",
     )
     parser.add_argument(
+        "--crawler-check",
+        default=None,
+        metavar="IP",
+        help="say whether an address belongs to a known crawler, then exit",
+    )
+    parser.add_argument(
+        "--crawler-status",
+        action="store_true",
+        help="show the loaded crawler ranges and where they came from, then exit",
+    )
+    parser.add_argument(
         "--metric",
         default=None,
         metavar="NAME",
@@ -344,6 +356,33 @@ def main_report(argv: Optional[List[str]] = None) -> int:
             return 1
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2))
         return 0
+
+    if args.crawler_status:
+        from . import crawler_ranges
+
+        print("generated: %s" % crawler_ranges.GENERATED_AT)
+        for label, meta in sorted(crawler_ranges.SOURCES.items()):
+            print(
+                "  %-18s %3d ranges  published %s"
+                % (label, meta["count"], meta["creation_time"])
+            )
+            print("    %s" % meta["url"])
+        print("  reverse DNS suffixes: %s" % ", ".join(
+            suffix for suffix, _ in crawlers.RDNS_SUFFIXES
+        ))
+        print("  never_report_crawlers: %s" % ("yes" if cfg.never_report_crawlers else "no"))
+        print("  crawler_rdns: %s" % ("yes" if cfg.crawler_rdns else "no"))
+        return 0
+
+    if args.crawler_check:
+        found, reason = crawlers.is_crawler(
+            args.crawler_check,
+            use_dns=cfg.crawler_rdns,
+            timeout=cfg.crawler_rdns_timeout,
+        )
+        print("%s: %s%s" % (args.crawler_check, "crawler" if found else "not a crawler",
+                            (" (%s)" % reason) if reason else ""))
+        return 0 if found else 1
 
     if args.metric:
         value = monitoring_value(cfg, args.metric)

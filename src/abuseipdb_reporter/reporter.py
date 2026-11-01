@@ -6,7 +6,18 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-from . import __version__, api, comments, coordination, db, evidence, log, metrics, status
+from . import (
+    __version__,
+    api,
+    comments,
+    coordination,
+    crawlers,
+    db,
+    evidence,
+    log,
+    metrics,
+    status,
+)
 from .config import Config
 
 #: injectable HTTP function signature: (url, api_key, fields, timeout) ->
@@ -23,6 +34,8 @@ class RunResult:
 
     sent: int = 0
     skipped: int = 0
+    #: Addresses skipped because they belong to a verified crawler.
+    crawlers_skipped: int = 0
     errors: int = 0
     pending: int = 0
     today: int = 0
@@ -248,6 +261,27 @@ def run_once(
                 log.log(cfg, "report: %s already reported recently, skipped" % ip)
                 continue
 
+            if getattr(cfg, "never_report_crawlers", True):
+                found, reason = crawlers.is_crawler(
+                    ip,
+                    use_dns=getattr(cfg, "crawler_rdns", True),
+                    timeout=float(getattr(cfg, "crawler_rdns_timeout", 2.0) or 2.0),
+                )
+                if found:
+                    # A ban can be lifted; an AbuseIPDB report cannot be deleted.  The
+                    # event is finished locally so the queue does not grow, and the skip
+                    # is counted, logged and exported as a metric.
+                    db.mark_reported(conn, ip)
+                    conn.commit()
+                    result.skipped += 1
+                    result.crawlers_skipped += 1
+                    log.log(
+                        cfg,
+                        "report: %s is a crawler (%s), not reported - the fail2ban rule "
+                        "that banned it needs fixing" % (ip, reason),
+                    )
+                    continue
+
             events = db.events_for(conn, ip)
             if not events:
                 continue
@@ -354,8 +388,14 @@ def run_once(
 
     log.log(
         cfg,
-        "report: run done sent=%d skipped=%d errors=%d pending=%d"
-        % (result.sent, result.skipped, result.errors, result.pending),
+        "report: run done sent=%d skipped=%d crawlers=%d errors=%d pending=%d"
+        % (
+            result.sent,
+            result.skipped,
+            result.crawlers_skipped,
+            result.errors,
+            result.pending,
+        ),
     )
     _publish(cfg, result, now, dry_run=dry_run)
     return result

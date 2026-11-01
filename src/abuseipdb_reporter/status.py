@@ -45,6 +45,7 @@ def build(cfg, result, now: Optional[int] = None, version: str = "") -> Dict[str
         "max_per_day": int(getattr(cfg, "max_reports_per_day", 0)),
         "retry_after": int(getattr(result, "retry_after", 0) or 0),
         "waited_seconds": round(float(getattr(result, "waited", 0.0) or 0.0), 3),
+        "crawlers_skipped": int(getattr(result, "crawlers_skipped", 0) or 0),
         "stopped": str(getattr(result, "stopped_reason", "") or ""),
         "budget_timezone": str(getattr(cfg, "daily_budget_timezone", "utc")),
     }
@@ -65,6 +66,12 @@ def prometheus(payload: Dict[str, Any]) -> str:
     metric("sent_last_run", "gauge", "Reports accepted during the last run.", payload["sent"])
     metric("skipped_last_run", "gauge", "IPs skipped during the last run (interval or rate limit).", payload["skipped"])
     metric("errors_last_run", "gauge", "Errors during the last run (transient API or build errors).", payload["errors"])
+    metric(
+        "crawlers_skipped_last_run",
+        "gauge",
+        "Addresses skipped because they belong to a verified crawler.",
+        payload.get("crawlers_skipped", 0),
+    )
     metric("run_timestamp_seconds", "gauge", "Unix time of the last run.", payload["ts"])
     metric("run_ok", "gauge", "1 when the last run finished without an error stop.", 0 if payload["errors"] else 1)
     metric("budget_remaining", "gauge", "Reports still allowed today.", max(0, int(payload["max_per_day"]) - int(payload["today"])))

@@ -168,10 +168,12 @@ def build(
         snapshot["last_run_sent"] = _int(last.get("sent"))
         snapshot["last_run_skipped"] = _int(last.get("skipped"))
         snapshot["last_run_errors"] = _int(last.get("errors"))
+        snapshot["last_run_crawlers_skipped"] = _int(last.get("crawlers_skipped"))
         snapshot["last_run_stopped"] = str(last.get("stopped", "") or "")
     else:
         snapshot["last_run_ts"] = 0
         snapshot["last_run_sent"] = snapshot["last_run_skipped"] = snapshot["last_run_errors"] = 0
+        snapshot["last_run_crawlers_skipped"] = 0
         snapshot["last_run_stopped"] = ""
 
     snapshot["max_per_day"] = _int(getattr(cfg, "max_reports_per_day", 0))
@@ -285,6 +287,12 @@ def prometheus(snapshot: Dict[str, Any]) -> str:
         "gauge",
         "Addresses skipped during the last run.",
         snapshot.get("last_run_skipped", 0),
+    )
+    metric(
+        "last_run_crawlers_skipped",
+        "gauge",
+        "Addresses skipped during the last run because they are verified crawlers.",
+        snapshot.get("last_run_crawlers_skipped", 0),
     )
     metric(
         "last_run_errors",
