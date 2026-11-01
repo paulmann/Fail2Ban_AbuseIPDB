@@ -407,7 +407,9 @@ coord.example.internal {
 ## Health endpoint and monitoring
 
 `GET /v1/health` answers **without** the shared secret and returns liveness-level
-facts only, so a monitoring host can poll it from an untrusted network:
+facts only, so a monitoring host can poll it from an untrusted network. Both
+services serve it: the coordinator (role, mode, TLS, lease) and the arbiter
+(`{"ok": true, "role": "witness", "live": ..., "persisted": ...}`):
 
 ```json
 {"ok": true, "role": "leader", "mode": "auto", "node_id": "edge-1",
@@ -446,6 +448,46 @@ Alerts worth having:
   to 24 hours, so a fail2ban restart does not turn into a flood of ban requests for
   jails the node does have. An empty answer is remembered for one TTL and never
   overwrites a known list.
+
+## Verify it on a real host
+
+`tools/verify-failover-tls.sh` exercises the whole path on a Linux host **without
+touching the installed configuration**: everything lives in a temporary directory,
+and the shipped binaries are started with a throw-away config.
+
+```bash
+scp -r src/abuseipdb_reporter host:/tmp/f2b-lib/
+ssh host 'LIB=/tmp/f2b-lib bash -s' < tools/verify-failover-tls.sh
+```
+
+Measured on 5.35 (Debian 12, Python 3.11) for 1.5.2:
+
+| Step | Result |
+|---|---|
+| arbiter health, no secret | `200 {"ok": true, "role": "witness", "persisted": true}` |
+| node-a asks for the lease | `200 {"granted": true, "owner": "node-a", "term": 1}` |
+| node-b asks while held | `409 {"granted": false, "reason": "lease held by node-a until ..."}` |
+| wrong secret | `403` |
+| arbiter restart | lease still owned by `node-a`, same term |
+| TLS, certificate not trusted | handshake fails (`http=000`) |
+| TLS, certificate as CA | `200` |
+| follower sync to a closed port | 2 attempts, `coord_sync_failures = 1`, `leader_up = -1` |
+| coordinator `/v1/health` over TLS, no secret | `200`, `tls: true` |
+| coordinator `/v1/status` over TLS, no secret | `403` |
+| one sync with the secret | `200`, `accepted: 1`, `inserted: 0`, `rejected: 1` |
+| `auto` without `witness_url` | `effective role: follower`, no reports |
+
+The `rejected: 1` is correct: the script pushes `198.51.100.77`, and
+`198.51.100.0/24` is inside the default `[ignore] ranges`. That is the rail doing
+its job, not a defect - the same reason a documentation address never reaches the
+API.
+
+Two traps the script itself had to solve, both worth knowing when you write your own
+check: a fixed `sleep` after starting the arbiter races with the interpreter start
+(and then a probe silently talks to the *previous* instance), and `pkill -f <name>`
+matches the checking shell itself when the pattern appears in its command line. The
+script frees the port by socket owner (`ss -lntpH`) and waits for the port to open
+and close.
 
 ## Security
 

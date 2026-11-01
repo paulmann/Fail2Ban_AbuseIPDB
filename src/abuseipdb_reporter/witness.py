@@ -34,6 +34,8 @@ MAX_BODY_BYTES = 4096
 LEASE_PATH = "/v1/lease"
 RELEASE_PATH = "/v1/release"
 STATUS_PATH = "/v1/status"
+#: Same route name the coordinator uses; a monitoring host polls it here too.
+HEALTH_PATH = "/v1/health"
 
 
 class LeaseStore:
@@ -179,7 +181,22 @@ class WitnessHandler(BaseHTTPRequestHandler):
         return payload if isinstance(payload, dict) else None
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib naming
-        if self.path.split("?")[0] != STATUS_PATH:
+        path = self.path.split("?")[0]
+        if path == HEALTH_PATH:
+            # No secret and no lease detail: liveness plus "is the file persisted".
+            snapshot = self.store.snapshot()
+            self._send(
+                200,
+                {
+                    "ok": True,
+                    "role": "witness",
+                    "time": snapshot["now"],
+                    "live": snapshot["live"],
+                    "persisted": bool(self.store.state_path),
+                },
+            )
+            return
+        if path != STATUS_PATH:
             self._send(404, {"error": "not found"})
             return
         self._send(200, dict(self.store.snapshot(), role="witness"))

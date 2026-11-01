@@ -120,6 +120,25 @@ A child turns yellow/red when a trigger of that server fires: a dead reporter, a
 follower that cannot reach its leader, a growing queue or a spent budget. The parent
 aggregates - one glance answers "is abuse reporting working anywhere".
 
+## Proving the service matching works
+
+A green tree proves nothing on its own: a service whose problem tags do not match
+any trigger stays green forever. `tools/zabbix-drill.ps1` creates a temporary
+trigger on one host with the same two tags, waits for the recalculation, prints the
+child status and removes the trigger:
+
+```powershell
+pwsh -File tools/zabbix-drill.ps1 -HostName hp-debian
+# triggering on svc.state[dovecot] (last value 1)
+# trigger created: 37043
+# attempt 1: problems=0 service status=-1
+# attempt 2: problems=1 service status=4
+# result: service matching WORKS
+```
+
+Status `4` is the High severity of the drill trigger - the child service took it and
+the parent follows the worst child.
+
 ## What this module deliberately does not do
 
 * It does not poll AbuseIPDB itself. The reporter's own snapshot is the source; a
@@ -129,6 +148,25 @@ aggregates - one glance answers "is abuse reporting working anywhere".
   page someone.
 * It does not read the log file. `status.json`, `metrics.prom`, `metrics.json` and
   `--metric` cover every number; a log trigger would break on a changed message.
+
+## Measured rollout (2026-11-01)
+
+Three servers, module 1.5.2, Zabbix 8.0.0:
+
+| Host | Agent | Items supported | Notes |
+|---|---|---|---|
+| `vps-176-99-5-35` | agent 1 (`zabbix_agentd`, source build) | 21 / 21 | include dir `/etc/zabbix/zabbix_agentd.d` |
+| `hp-debian` (192.168.31.31) | agent 1 (source build, `/usr/local`) | 21 / 21 | include dir `/usr/local/etc/zabbix_agentd.conf.d` |
+| `vpn-exit-de-web` (199.195.197.95) | agent 2 (package) | 21 / 21 | include dir `/etc/zabbix/zabbix_agent2.d` |
+
+Every item answers `state=0`; the service tree shows the parent plus three children,
+all OK. Two findings from the rollout, both fixed in 1.5.2:
+
+* nine items answered `unknown metric`: the snapshot stores `accepted_total`, the
+  agent asked for `coord_accepted_total` (the Prometheus name). `--metric` now
+  accepts both spellings, and a test resolves every generated item name.
+* the agent could not run the CLI at all until the sudo rule included `--metric *`;
+  `UserParameter` now uses `sudo -n` and the snapshot stays `0600 root:root`.
 
 ## Troubleshooting
 

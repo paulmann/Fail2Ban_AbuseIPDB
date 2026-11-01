@@ -12,7 +12,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20systemd%20%7C%20cron-lightgrey)](#requirements-and-compatibility)
-[![Tests](https://img.shields.io/badge/tests-236%20passing-brightgreen.svg)](tests)
+[![Tests](https://img.shields.io/badge/tests-237%20passing-brightgreen.svg)](tests)
 [![Wiki](https://img.shields.io/badge/wiki-20%20pages-8A2BE2)](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki)
 [![Stars](https://img.shields.io/github/stars/paulmann/Fail2Ban_AbuseIPDB?style=social&label=Stars)](https://github.com/paulmann/Fail2Ban_AbuseIPDB/stargazers)
 
@@ -20,7 +20,7 @@ Fail2Ban knows **who** attacked and **why**. AbuseIPDB wants a short factual rep
 
 This project separates the two paths. The ban stays local and instant. A small SQLite queue stores what happened. A scheduled worker (systemd timer or cron, every 16 minutes) turns the queue into evidence-backed reports, respects AbuseIPDB rate limits, retries failures and never blocks the firewall. The API key lives in its own file, and `abuseipdb-upgrade` updates the installation from GitHub without losing the key, the configuration, the queue or the jail list.
 
-> **Documentation status.** Counts in this README were re-measured from the working tree on 2026-11-01 (v1.5.1): 236 tests, 20 source modules, 91 tracked files, 20 wiki pages. The operator-facing long-form documentation lives in the [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki); the design-level documents live under [`docs/`](docs/).
+> **Documentation status.** Counts in this README were re-measured from the working tree on 2026-11-01 (v1.5.1): 237 tests, 20 source modules, 91 tracked files, 20 wiki pages. The operator-facing long-form documentation lives in the [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki); the design-level documents live under [`docs/`](docs/).
 
 ---
 
@@ -134,7 +134,7 @@ Measured from the working tree on 2026-11-01 (v1.4.0):
 | Surface | Count | Measured from |
 |---|---|---|
 | Python package modules | **16** files · 3,352 lines | `src/abuseipdb_reporter/*.py` |
-| Tests | **236** passing (1 skipped on Windows only) | `python -m unittest discover -s tests -t .` |
+| Tests | **237** passing (1 skipped on Windows only) | `python -m unittest discover -s tests -t .` |
 | Test code | 16 files · 2,662 lines | `tests/` |
 | Installer and shell tooling | 863 lines | `*.sh` + `tests/integration/*.sh` |
 | Documentation pages | 20 · 2,439 lines | `docs/*.md` |

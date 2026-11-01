@@ -4,6 +4,38 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.5.3] - 2026-11-01
+
+### Added
+
+* **The failover arbiter serves `GET /v1/health` too**, so a monitoring host can poll
+  the arbiter and the coordinator the same way. Without it the arbiter answered 404 on
+  a route the documentation already promised - found by running the end-to-end check
+  on a real host, not by a test.
+* `tools/verify-failover-tls.sh` - end-to-end check of the arbiter, TLS and the
+  follower retry path on a Linux host, in a temporary directory, with the installed
+  configuration untouched. `tools/zabbix-drill.ps1` proves the Zabbix service matching
+  by firing one tagged problem and watching the service move.
+* `tools/zabbix-agent-install.ps1` installs the agent key and the sudo rule per host,
+  handling agent 1 and agent 2 include directories and config paths.
+
+### Fixed
+
+* `tools/gen_zabbix_template.py`: the `UserParameter` ships the `sudo -n` form and the
+  sudoers rule covers `--metric *`, so the snapshot stays `0600 root:root` and the
+  agent can still read a value.
+
+### Verified on real hosts
+
+Three servers (5.35, 192.168.31.31, 199.195.197.95) run 1.5.2 and the Zabbix module
+answers 21/21 items on each; the service tree shows the parent and three children, and
+a drill fired a tagged problem that moved the service to High. The end-to-end script
+measured: lease grant/refuse and its survival across a restart, `403` on a wrong
+secret, TLS refusing an untrusted certificate and accepting a trusted one, follower
+retries with counters, and `auto` without a witness staying a follower.
+
+Tests: **237**.
+
 ## [1.5.2] - 2026-11-01
 
 ### Fixed
@@ -380,3 +412,4 @@ release ships the build pipeline, not new behaviour.
 [1.5.0]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.5.0
 [1.5.1]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.5.1
 [1.5.2]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.5.2
+[1.5.3]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.5.3

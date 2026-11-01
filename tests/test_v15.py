@@ -411,6 +411,14 @@ class WitnessServerTests(TempDirTestCase):
         self.assertFalse(answer["granted"])
         self.assertEqual(answer.get("status"), 403)
 
+    def test_health_needs_no_secret(self):
+        with urllib.request.urlopen(self.url + witness.HEALTH_PATH, timeout=5) as response:
+            body = json.loads(response.read().decode())
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["role"], "witness")
+        self.assertIn("live", body)
+        self.assertNotIn("owner", body)  # no lease detail on the unauthenticated route
+
     def test_status_is_readable_without_a_secret(self):
         self.client.lease("node-a", 60)
         with urllib.request.urlopen(self.url + witness.STATUS_PATH, timeout=5) as response:
