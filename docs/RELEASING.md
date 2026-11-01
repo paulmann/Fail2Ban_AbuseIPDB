@@ -36,9 +36,9 @@ can be revoked; the CI path does not read it.
    disagree with the tag:
 
    ```bash
-   python tools/bump_string.py src/abuseipdb_reporter/__init__.py '__version__ = "1.4.1"' '__version__ = "1.4.2"'
-   python tools/bump_string.py pyproject.toml 'version = "1.4.1"' 'version = "1.4.2"'
-   python tools/bump_string.py install.sh 'VERSION="1.4.1"' 'VERSION="1.4.2"'
+   python tools/bump_string.py src/abuseipdb_reporter/__init__.py '__version__ = "<old>"' '__version__ = "<new>"'
+   python tools/bump_string.py pyproject.toml 'version = "<old>"' 'version = "<new>"'
+   python tools/bump_string.py install.sh 'VERSION="<old>"' 'VERSION="<new>"'
    ```
 
 2. **Write the changelog entry** in `CHANGELOG.md` (Keep a Changelog sections,
@@ -61,9 +61,9 @@ can be revoked; the CI path does not read it.
 
    ```bash
    git add -A
-   git -c 'user.name=<owner>' -c 'user.email=<owner@mail>' commit -m 'release: v1.4.2'
-   git tag -a v1.4.2 -m 'v1.4.2: <one line>'
-   git push origin main && git push origin v1.4.2
+   git -c 'user.name=<owner>' -c 'user.email=<owner@mail>' commit -m 'release: v<new>'
+   git tag -a v<new> -m 'v<new>: <one line>'
+   git push origin main && git push origin v<new>
    ```
 
 5. **Watch the run**. `Release` builds the tarball, the wheel and the sdist, runs
@@ -73,7 +73,7 @@ can be revoked; the CI path does not read it.
    ```bash
    gh run list -L 2
    gh run watch <id>
-   gh release view v1.4.2 --json assets -q '.assets[].name'
+   gh release view v<new> --json assets -q '.assets[].name'
    ```
 
 6. **Update `updater.json`** with the checksum the workflow printed in its

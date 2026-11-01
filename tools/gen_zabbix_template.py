@@ -259,7 +259,7 @@ def render_readme() -> str:
 | File | Goes to | Purpose |
 |---|---|---|
 | `userparameter_fail2ban_abuseipdb.conf` | `/etc/zabbix/zabbix_agent2.d/` | one `UserParameter` returning the Prometheus snapshot |
-| `fail2ban_abuseipdb.yaml` | imported as a template (UI or API) | master text item, 21 dependent items, 8 triggers, 3 macros |
+| `fail2ban_abuseipdb.yaml` | imported as a template (UI or API) | 22 items, 9 triggers, 3 macros |
 | `abuseipdb-metrics-sudoers` | `/etc/sudoers.d/zabbix-abuseipdb` (optional) | lets the agent run the CLI when the metrics file is unreadable |
 
 Regenerate after changing the metric list: `python tools/gen_zabbix_template.py`

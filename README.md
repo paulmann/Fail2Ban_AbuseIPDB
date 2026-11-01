@@ -20,7 +20,7 @@ Fail2Ban knows **who** attacked and **why**. AbuseIPDB wants a short factual rep
 
 This project separates the two paths. The ban stays local and instant. A small SQLite queue stores what happened. A scheduled worker (systemd timer or cron, every 16 minutes) turns the queue into evidence-backed reports, respects AbuseIPDB rate limits, retries failures and never blocks the firewall. The API key lives in its own file, and `abuseipdb-upgrade` updates the installation from GitHub without losing the key, the configuration, the queue or the jail list.
 
-> **Documentation status.** Counts in this README were re-measured from the working tree on 2026-11-01 (v1.5.1): 250 tests, 20 source modules, 91 tracked files, 20 wiki pages. The operator-facing long-form documentation lives in the [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki); the design-level documents live under [`docs/`](docs/).
+> **Documentation status.** Counts in this README were re-measured from the working tree on 2026-11-01 (v1.6.1): 250 tests, 22 source modules, 124 tracked files, 20 numbered wiki pages plus Home. The operator-facing long-form documentation lives in the [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki); the design-level documents live under [`docs/`](docs/).
 
 ---
 
@@ -129,17 +129,17 @@ The caveat that matters: the project does not ban better than fail2ban and does 
 
 ## By the numbers
 
-Measured from the working tree on 2026-11-01 (v1.4.0):
+Measured from the working tree on 2026-11-01 (v1.6.1):
 
 | Surface | Count | Measured from |
 |---|---|---|
-| Python package modules | **16** files · 3,352 lines | `src/abuseipdb_reporter/*.py` |
+| Python package modules | **22** files · 5,840 lines | `src/abuseipdb_reporter/*.py` |
 | Tests | **250** passing (1 skipped on Windows only) | `python -m unittest discover -s tests -t .` |
-| Test code | 16 files · 2,662 lines | `tests/` |
-| Installer and shell tooling | 863 lines | `*.sh` + `tests/integration/*.sh` |
-| Documentation pages | 20 · 2,439 lines | `docs/*.md` |
+| Test code | 17 files · 3,605 lines | `tests/` |
+| Installer and shell tooling | 12 files · 1,489 lines | `*.sh`, `bin/*`, `tools/*.sh`, `tests/integration/*.sh` |
+| Documentation pages | 26 · 2,996 lines | `docs/*.md` |
 | Wiki pages | 20 | `Fail2Ban_AbuseIPDB.wiki` |
-| Tracked files | 86 | `git ls-files` |
+| Tracked files | 124 | `git ls-files` |
 | Runtime dependencies | **0** | `pyproject.toml` (none) |
 | Worker memory | about 13 MB RSS | measured on a production host |
 | Enqueue latency | about 0.1 s | 10 enqueues in 1.06 s, including interpreter start-up |
@@ -771,7 +771,7 @@ Windows and macOS are not supported for deployment (the fail2ban action and the 
 
 | Document | Contents |
 |---|---|
-| [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki) | 20 pages: why, getting started, architecture, configuration, keys, self-update, report anatomy, Fail2Ban fundamentals, web protection, SSH/mail/FTP, verification and rollback, three agent-prompt collections, troubleshooting, FAQ, development, multi-host coordination (roles, two-way sync, ban propagation) |
+| [Wiki](https://github.com/paulmann/Fail2Ban_AbuseIPDB/wiki) | 20 numbered pages: why, getting started, architecture, configuration, keys, self-update, report anatomy, Fail2Ban fundamentals, web protection, SSH/mail/FTP, verification and rollback, three agent-prompt collections, troubleshooting, FAQ, development, multi-host coordination (roles, two-way sync, ban propagation, witness failover, TLS), monitoring and Zabbix (metrics, health endpoint, service tree), good bots (measured crawler status, the never-report rail) |
 | [`docs/INSTALL.md`](docs/INSTALL.md) | installation reference, options, verification, upgrade, uninstall |
 | [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) | every option, key resolution, categories, ignore ranges |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | ban path, report path, queue schema, evidence, classifiers, status file, key file, updater |
@@ -789,7 +789,7 @@ Start with [Wiki — Getting Started](https://github.com/paulmann/Fail2Ban_Abuse
 ## Development
 
 ```bash
-# 249 unit tests (Python 3.9+, no network, no root)
+# 250 unit tests (Python 3.9+, no network, no root)
 python -m unittest discover -s tests -t .
 
 # end-to-end test: real worker + queue + mock AbuseIPDB API (no external calls)

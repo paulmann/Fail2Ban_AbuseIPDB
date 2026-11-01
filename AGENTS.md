@@ -16,6 +16,22 @@ A fail2ban action that writes every new ban into a local SQLite queue, plus a sc
 | Writes to | `/usr/local/lib/abuseipdb_reporter/`, `/usr/local/sbin/abuseipdb-report`, `abuseipdb-enqueue`, `abuseipdb-upgrade`, `/etc/abuseipdb/reporter.conf` (600), `/etc/abuseipdb/.abuseipdb.key` (600), `/var/lib/abuseipdb/abuseipdb.sqlite3`, `/var/lib/abuseipdb/status.json` (last run status, atomic rewrite), optional Prometheus textfile, `/etc/abuseipdb/.coord.secret` (optional coordination secret, mode 600, created by the operator, never by the installer), `/etc/systemd/system/abuseipdb-coord.service` (installed, never enabled), `/etc/fail2ban/action.d/abuseipdb-async.conf`, `/etc/fail2ban/jail.d/50-abuseipdb-reporter.local`, systemd units `abuseipdb-report.{service,timer}` or `/etc/cron.d/abuseipdb-reporter`, `/etc/logrotate.d/abuseipdb-reporter`, `/var/log/abuseipdb-reporter.log`, backups in `/var/backups/fail2ban-abuseipdb/pristine-<timestamp>/`, state in `/var/lib/fail2ban-abuseipdb/install-state` |
 | Network access | HTTPS to `api.abuseipdb.com` (`/api/v2/report`, `/api/v2/check`); `raw.githubusercontent.com` / `github.com` for `updater.json` and the release tarball |
 
+### What 1.5.x and 1.6.x added
+
+| Capability | Where | Default |
+|---|---|---|
+| one account, several servers | `mode = leader` / `follower` / `auto`, two-way sync with ban propagation | `none` |
+| automatic failover | `failover = witness` plus `abuseipdb-witness`, which grants a time-limited lease | `none` (manual) |
+| encrypted coordinator | `tls_cert`/`tls_key`, mTLS via `tls_client_ca` | plain HTTP on a private bind |
+| monitoring | `--metrics`, `--metric <name>`, `metrics.prom` and `metrics.json`, `GET /v1/health` | files written every run |
+| Zabbix | `monitoring/zabbix/` template (22 items, 9 triggers) plus the service tree | opt-in |
+| good bots | `[report] never_report_crawlers = yes`: published ranges plus reverse DNS | on |
+
+A ban can be lifted; an AbuseIPDB report cannot be deleted. That asymmetry is why the
+crawler rail is on by default: never report an address that belongs to a search engine or
+an AI crawler - fix the fail2ban rule that banned it instead. Details:
+[docs/GOOD-BOTS.md](docs/GOOD-BOTS.md).
+
 ## 2. Preconditions
 
 | Requirement | Why | Check |
@@ -74,8 +90,13 @@ fail2ban-client get sshd actions
 # API key source: key file /etc/abuseipdb/.abuseipdb.key
 
 /usr/local/sbin/abuseipdb-report --stats
+/usr/local/sbin/abuseipdb-report --metric pending_events            # 0; exit 2 on an unknown name
+/usr/local/sbin/abuseipdb-report --crawler-check 66.249.66.5        # crawler (published google range)
 systemctl list-timers abuseipdb-report.timer     # or: cat /etc/cron.d/abuseipdb-reporter
 ```
+
+With coordination enabled, `abuseipdb-report --coord-status` prints the configured mode,
+the role the node acts as right now, the lease, and what the leader answers.
 
 A healthy install shows entries like `reported ip=... -> 200 {...}` in `/var/log/abuseipdb-reporter.log`.
 
@@ -206,6 +227,14 @@ The scheduler runs the worker every 16 minutes (systemd timer with `Persistent=t
 - [docs/RELEASING.md](docs/RELEASING.md) - maintainer release path: version bump, tag, CI publish to PyPI over OIDC trusted publishing, `updater.json`.
 - [docs/UPDATE.md](docs/UPDATE.md) - update manifest, `--check`/`--upgrade` semantics, rollback, weekly check.
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - diagnosis recipes used in section 7.
+- [docs/ZABBIX.md](docs/ZABBIX.md) - the Zabbix module: what is monitored, agent key,
+  import, service tree, the drill that proves the matching, measured rollout.
+- [docs/GOOD-BOTS.md](docs/GOOD-BOTS.md) - good bots: measured status on the estate, the
+  never-report rail, how to keep the firewall polite.
+- `monitoring/zabbix/` (generated template, agent key, sudoers),
+  `tools/gen_zabbix_template.py`, `tools/zabbix-{import,services,drill,agent-install}.ps1`,
+  `tools/audit-good-bots.sh`, `tools/fail2ban-ignore-good-bots.sh`,
+  `tools/update_crawler_ranges.py`, `tools/verify-failover-tls.sh`.
 - `install.sh` (`VERSION="1.3.0"`, `usage()`, exit paths), `config/reporter.conf.example`, `fail2ban/action.d/abuseipdb-async.conf`, `systemd/abuseipdb-report.{service,timer}`, `systemd/abuseipdb-coord.service`, `cron/abuseipdb-reporter`, `logrotate/abuseipdb-reporter` - host changes and defaults.
 - `src/abuseipdb_reporter/{cli,updater,keys,config,enqueue,reporter,api,evidence,comments,db,status,log,iputil,coordination,coord_server}.py`, `pyproject.toml`, `updater.json`, `CHANGELOG.md` - version 1.3.0, flags, exit codes, key resolution order, classifier registry, status document, coordination roles, release asset and checksum.
 - [docs/COORDINATION.md](docs/COORDINATION.md) - roles, configuration, shared secret, failover, security, failure modes.

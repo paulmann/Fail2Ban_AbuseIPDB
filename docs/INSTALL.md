@@ -122,6 +122,21 @@ tail -n 20 /var/log/abuseipdb-reporter.log
 
 A healthy installation shows `reports today: N`, `pending events: 0` and entries
 like `reported ip=... -> 200 {"data":{"abuseConfidenceScore":...}}` in the log.
+
+```bash
+# 6. Version, one metric and the crawler rail
+/usr/local/sbin/abuseipdb-report --version
+/usr/local/sbin/abuseipdb-report --metric pending_events      # one number, exit 2 on an unknown name
+/usr/local/sbin/abuseipdb-report --crawler-check 66.249.66.5  # -> crawler (published google range)
+/usr/local/sbin/abuseipdb-report --crawler-status             # which lists are loaded, and when published
+```
+
+### Optional: monitoring
+
+`--metrics` prints a Prometheus document, and every run writes `metrics.prom` plus
+`metrics.json` - enough for a textfile collector or a cron alert. A ready Zabbix module
+(template with 22 items and 9 triggers, agent key, per-server service tree, and a drill
+that proves the matching) ships in the repository: [ZABBIX.md](ZABBIX.md).
 Automatic bans appear in the queue within seconds and are sent on the next
 timer tick (at most 16 minutes later).
 

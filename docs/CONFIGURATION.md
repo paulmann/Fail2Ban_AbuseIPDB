@@ -35,7 +35,9 @@ is the `ABUSEIPDB_REPORTER_CONFIG` environment variable.
 |---|---|---|
 | `path` | `/var/log/abuseipdb-reporter.log` | one line per event, per report and per error |
 | `status_path` | `/var/lib/abuseipdb/status.json` | machine-readable status of the last run; set it to an empty value to disable the file |
-| `prometheus_textfile` | *(empty)* | if set, the same numbers are written as a Prometheus text-exposition file for the `node_exporter` textfile collector |
+| `metrics_textfile` | `/var/lib/abuseipdb/metrics.prom` | full snapshot as a Prometheus text-exposition file (what the Zabbix module reads) |
+| `metrics_json_path` | `/var/lib/abuseipdb/metrics.json` | the same snapshot as JSON, read by `--metric <name>` |
+| `prometheus_textfile` | *(empty)* | optional extra export of the run status only (older, smaller set of series) |
 
 See [Monitoring](#monitoring-status-file-and-metrics) below.
 
@@ -72,7 +74,7 @@ security rules: [COORDINATION.md](COORDINATION.md).
 
 | Option | Default | Meaning |
 |---|---|---|
-| `mode` | `none` | `none` (standalone), `leader` (reports and accepts pushed events) or `follower` (pushes, never reports, needs no API key) |
+| `mode` | `none` | `none` (standalone), `leader` (reports and accepts pushed events), `follower` (pushes, never reports, needs no API key) or `auto` (candidate: leader while it holds the failover lease) |
 | `node_id` | *(empty)* | name of this node in logs and in the leader's status |
 | `leader_url` | *(empty)* | follower only: base URL of the leader, `http://` or `https://` |
 | `shared_secret_file` | `/etc/abuseipdb/.coord.secret` | file holding the shared secret (mode 600, identical everywhere) |
@@ -83,6 +85,18 @@ security rules: [COORDINATION.md](COORDINATION.md).
 | `max_remote_bans_per_run` | `20` | follower: cap on remote bans applied per run (ceiling 200) |
 | `peer_dedupe_window` | `900` | seconds an address counts as "already reported" by the cluster |
 | `max_sync_bans` | `50` | leader: cap on bans carried by one sync answer |
+| `sync_attempts` | `3` | follower: attempts per run before giving up until the next tick |
+| `sync_retry_base` | `1.0` | follower: base delay of the exponential backoff, seconds |
+| `failover` | `none` | `none` (manual) or `witness` (an arbiter grants a time-limited lease) |
+| `witness_url` | *(empty)* | where `abuseipdb-witness` listens |
+| `witness_timeout` | `5` | lease request timeout, seconds |
+| `lease_ttl` | `1800` | how long a granted lease stays valid; must exceed the timer interval |
+| `lease_state_path` | `/var/lib/abuseipdb/witness-lease.json` | arbiter state file |
+| `tls_cert`, `tls_key` | *(empty)* | switch the coordinator endpoint to HTTPS (TLS 1.2 floor) |
+| `tls_client_ca` | *(empty)* | require a client certificate (mTLS) |
+| `tls_ca` | *(empty)* | follower: CA to trust; a self-signed certificate works as its own CA |
+| `tls_verify` | `yes` | follower: verify the leader certificate (`no` is for test rigs only) |
+| `tls_client_cert`, `tls_client_key` | *(empty)* | follower: client certificate for mTLS |
 
 An unknown `mode` value is treated as `none`, so a typo can never turn a node
 into a follower of nobody. The coordination HTTP timeout reuses
@@ -94,6 +108,19 @@ sync but stops the follower from applying remote bans; `peer_dedupe_window` is
 how long an address stays "already reported". Full guide:
 [COORDINATION.md](COORDINATION.md).
 
+**Failover.** With `mode = leader` and `failover = none` (both defaults) failover is
+manual: move the key, change the mode, restart. With `mode = auto` and
+`failover = witness` the role follows a time-limited lease granted by
+`abuseipdb-witness`, and an expired or unreachable lease means **follower** - a lost
+arbiter can never produce two leaders. Every candidate then needs the API key, since
+any of them may become the leader. Procedure and the reasons behind it:
+[COORDINATION.md](COORDINATION.md#failover).
+
+**TLS.** Set `tls_cert` and `tls_key` on the leader to serve HTTPS, `tls_ca` on the
+followers to verify it (a self-signed certificate is its own CA), and
+`tls_client_ca` / `tls_client_cert` if you want mutual TLS. If TLS terminates in
+nginx or Caddy, keep `coord_bind = 127.0.0.1`.
+
 ## `[report]`
 
 | Option | Default | Meaning |
@@ -102,9 +129,19 @@ how long an address stays "already reported". Full guide:
 | `hostname` | *(auto-detected)* | reserved for comments/logs |
 | `attribution` | `yes` | append the project credit to every report |
 | `attribution_text` | `Reported via Fail2Ban_AbuseIPDB Monitor: https://github.com/paulmann/Fail2Ban_AbuseIPDB` | text of the credit; replace it with your own link or a neutral phrase |
+| `never_report_crawlers` | `yes` | never report an address in a published crawler range, or one whose reverse DNS (confirmed forward) says Googlebot/Bingbot/Yandex/Applebot/Amazonbot/CCBot |
+| `crawler_rdns` | `yes` | also confirm crawlers by reverse DNS (one lookup per new address, cached for the run) |
+| `crawler_rdns_timeout` | `2.0` | per-lookup DNS timeout, seconds |
 
 `server_ip` and `hostname` are informational only. Leave them empty to omit the
 server line.
+
+The crawler rail exists because the two actions are not equally reversible: a ban can
+be lifted, an AbuseIPDB report cannot be deleted. A skip is logged, counted in
+`status.json` (`crawlers_skipped`) and exported as
+`abuseipdb_reporter_last_run_crawlers_skipped`; a non-zero value means a fail2ban rule
+banned a crawler and needs fixing. Which networks and names are recognised, and the
+deliberate limits: [GOOD-BOTS.md](GOOD-BOTS.md).
 
 ### Attribution footer
 
@@ -297,25 +334,44 @@ abuseipdb-report --status
   "stopped": "",
   "today": 42,
   "ts": 1767260400,
-  "version": "1.2.1",
+  "version": "1.6.1",
   "waited_seconds": 2.0
 }
 ```
 
-With `prometheus_textfile` set, the same numbers are exported for the
-`node_exporter` textfile collector:
+With `metrics_textfile` set (`/var/lib/abuseipdb/metrics.prom` by default), every run
+writes the same numbers for the `node_exporter` textfile collector, and
+`metrics_json_path` (`metrics.json`) holds the JSON twin that `--metric` reads:
 
 ```
-abuseipdb_reporter_pending_events 3
-abuseipdb_reporter_reports_today 42
-abuseipdb_reporter_sent_last_run 2
-abuseipdb_reporter_skipped_last_run 0
-abuseipdb_reporter_errors_last_run 0
-abuseipdb_reporter_run_timestamp_seconds 1767260400
-abuseipdb_reporter_run_ok 1
-abuseipdb_reporter_budget_remaining 858
-abuseipdb_reporter_info{version="1.2.1",stopped="",budget_timezone="utc"} 1
+abuseipdb_reporter_info{version="1.6.1",mode="none",node_id="",failover="none",tls="no"} 1
+abuseipdb_reporter_enabled 1
+abuseipdb_reporter_pending_events 0
+abuseipdb_reporter_reports_today 0
+abuseipdb_reporter_budget_remaining 900
+abuseipdb_reporter_last_run_sent 1
+abuseipdb_reporter_last_run_skipped 0
+abuseipdb_reporter_last_run_crawlers_skipped 0
+abuseipdb_reporter_last_run_errors 0
+abuseipdb_reporter_coord_sync_failures 0
+abuseipdb_reporter_lease_held 0
+abuseipdb_reporter_leader_up -1
 ```
+
+On demand, without waiting for the next run:
+
+```bash
+abuseipdb-report --metrics                  # the whole document
+abuseipdb-report --metric pending_events    # one value (exit 2 on an unknown name)
+abuseipdb-report --metric coord_accepted_total   # the Prometheus spelling works too
+abuseipdb-report --crawler-status           # loaded crawler lists and their dates
+abuseipdb-report --crawler-check 66.249.66.5     # is this address a crawler?
+```
+
+`--metric` reads the snapshot file first and computes a live snapshot when the key is
+not there - a file written by an older build therefore never leaves an item
+unsupported. Ready-made Zabbix module (template, agent key, service tree):
+[ZABBIX.md](ZABBIX.md).
 
 Writing status is best effort: an unwritable directory is logged and never turns
 a successful run into a failed one. A dry run never overwrites the status of the

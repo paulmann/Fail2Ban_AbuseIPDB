@@ -4,6 +4,24 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Documentation
+
+* Every page now matches 1.6.1: `CONFIGURATION.md` documents the 1.5/1.6 keys
+  (`mode = auto`, `failover`, `witness_*`, `lease_*`, the TLS set, `metrics_textfile`,
+  `metrics_json_path`, the `[report]` crawler keys) and shows the real snapshot output;
+  `ARCHITECTURE.md` gained the new modules, the metrics pipeline and the crawler rail and
+  no longer claims that a lease is impossible - it explains why the arbiter is the only
+  safe form of one; `INSTALL.md` ends with `--metric` / `--crawler-check` and a
+  monitoring pointer; `TROUBLESHOOTING.md` gained a coordination/monitoring/crawler
+  matrix; `RELEASING.md` uses placeholders instead of the 1.4.1 example; `README.md`
+  counts are re-measured (250 tests, 22 modules, 124 tracked files, 26 documentation
+  pages) and the wiki list names the monitoring and good-bot pages; `AGENTS.md` lists
+  the new documents, tools and the 1.5/1.6 capability table.
+* `docs/release-notes-1.6.1.md` added - the directory had notes for every release up to
+  1.6.0.
+
 ## [1.6.1] - 2026-11-01
 
 ### Fixed

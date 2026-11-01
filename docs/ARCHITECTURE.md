@@ -43,6 +43,14 @@ it later.
 | `src/abuseipdb_reporter/comments.py` | builds a PII-free comment, categories, timestamp |
 | `src/abuseipdb_reporter/api.py` | urllib-based API client (no third-party dependencies) |
 | `src/abuseipdb_reporter/reporter.py` | the run loop and rate-limit policy |
+| `src/abuseipdb_reporter/cli.py` | argument parsing for all four entry points (`--stats`, `--metrics`, `--metric`, `--crawler-*`, `--coord-status`) |
+| `src/abuseipdb_reporter/status.py` | run counters to `status.json` and the optional Prometheus export |
+| `src/abuseipdb_reporter/metrics.py` | the full snapshot (queue, role, lease, last run) as Prometheus text and JSON |
+| `src/abuseipdb_reporter/coordination.py` | two-way sync, the leader's filters, remote bans, TLS context |
+| `src/abuseipdb_reporter/coord_server.py` | the leader endpoint (`/v1/sync`, `/v1/status`, `/v1/health`) |
+| `src/abuseipdb_reporter/witness.py`, `witness_client.py`, `bin/abuseipdb-witness` | optional failover arbiter: grants a time-limited leadership lease |
+| `src/abuseipdb_reporter/crawlers.py`, `crawler_ranges.py` | the crawler rail: published ranges plus reverse DNS, so a good bot is never reported |
+| `monitoring/zabbix/`, `tools/zabbix-*.ps1` | ready Zabbix module (template, agent key, service tree, drill) |
 
 ## API key storage
 
@@ -169,11 +177,22 @@ attacker-chosen usernames).
 ### Status and metrics
 
 After every run (and on every early exit: disabled, missing key, exhausted
-budget) `status.record()` writes the run counters to `status_path` and, when
-configured, to `prometheus_textfile`. Both files are replaced atomically
-(temporary file + `os.replace`), so a monitoring scrape never sees a partial
-document. Writing is best effort: an unwritable directory is logged and the run
-still counts as successful. Dry runs skip it entirely.
+budget) two documents are written, both replaced atomically (temporary file +
+`os.replace`), so a monitoring scrape never sees a partial document:
+
+| File | Writer | Content |
+|---|---|---|
+| `status.json` (`status_path`) | `status.record()` | the run counters of this very run |
+| `metrics.prom`, `metrics.json` (`metrics_textfile`, `metrics_json_path`) | `metrics.build()` | the whole snapshot: queue, budget, coordination counters, role, lease, last run |
+
+`metrics.prom` is what a Prometheus textfile collector picks up; `metrics.json` is the
+same numbers for `abuseipdb-report --metric <name>`, which monitors the snapshot
+instead of opening the database on every poll. `--metrics` prints the document
+without waiting for the next run.
+
+Writing is best effort: an unwritable directory is logged and the run still counts as
+successful. Dry runs skip it entirely. The ready Zabbix module reads these through the
+agent (`monitoring/zabbix/`, [ZABBIX.md](ZABBIX.md)).
 
 ### Multi-host coordination (optional)
 
@@ -193,9 +212,32 @@ back), and `reported_cache` (addresses reported by anyone in the cluster inside
 Remote bans are applied through `fail2ban-client` with rails: ignore ranges, own
 `server_ip`, a strict jail-name pattern, a per-run cap, and no unban at all.
 
-There is no election and no shared lease on purpose: a lease file cannot be made
-safe without an atomic compare-and-swap, and a split brain spends the budget
-twice. Failover is a documented manual procedure (move the key, switch `mode`).
+Failover is manual by default: move the key, switch `mode`, restart. A lease file on
+shared storage is deliberately **not** used - without an atomic compare-and-swap two
+nodes renewing it both believe they are the leader, and a split brain spends the budget
+twice.
+
+Optional automatic failover adds a separate arbiter instead:
+`mode = auto` + `failover = witness`. `abuseipdb-witness` is the only writer of a
+time-limited lease, it only ever *grants*, and it never revokes - a node that cannot
+reach it keeps a lease it already holds until it expires. An expired or missing lease
+means **follower**, so a lost arbiter can never produce two leaders; the lease is
+persisted so a restart of the arbiter does not hand leadership to a second node.
+
+### Crawler rail
+
+A ban can be lifted; an AbuseIPDB report cannot be deleted. So before a report is
+built, `crawlers.is_crawler()` asks two questions: does the address belong to a
+published crawler network (Google and OpenAI publish machine-readable lists, generated
+into `crawler_ranges.py` with each publisher's own `creationTime`), and does its
+reverse DNS - confirmed by a forward lookup - say Googlebot, Bingbot, Yandex, Applebot,
+Amazonbot, CCBot, ByteDance or Perplexity? A match finishes the event locally without
+an API call and increments `crawlers_skipped`.
+
+Two things it deliberately does not do: it never trusts a `User-Agent` (anybody can
+send one), and it never whitelists a whole cloud (`17.0.0.0/8`, `34.0.0.0/8`), because
+a scraper renting a VM there must stay bannable. Which publishers are covered, and
+which cannot be covered mechanically: [GOOD-BOTS.md](GOOD-BOTS.md).
 
 ## Scheduling
 

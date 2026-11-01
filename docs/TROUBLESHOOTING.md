@@ -201,3 +201,25 @@ systemctl start abuseipdb-report.timer
 
 The queue only contains bans that have not been reported yet; removing it loses
 those reports but does not affect the firewall state.
+
+## Coordination, monitoring and crawlers (1.5+)
+
+The symptom-to-action recipes for the newer parts live next to the feature, because
+they depend on which side asked the question:
+
+| Symptom | Where to look |
+|---|---|
+| a follower reports nothing and `pending` grows | [COORDINATION.md](COORDINATION.md#failure-modes): `--coord-status`, the shared secret, `leader_url` |
+| `coord_sync_failures` climbs, `leader_up = 0` | the leader endpoint is down or the port is closed - [COORDINATION.md](COORDINATION.md#tls) for TLS, the firewall for the port |
+| every node says `effective role: follower` in `auto` | nobody holds the lease: `abuseipdb-witness --status`, `witness_url`, the shared secret |
+| a Zabbix item is `ZBX_NOTSUPPORTED` | the agent cannot run the CLI - [ZABBIX.md](ZABBIX.md#troubleshooting) |
+| `--metric` answers `unknown metric` | the name must match a template item; `--crawler-status` and `--metric <name>` list what exists |
+| `crawlers_skipped` above zero, "a crawler was banned" fires | a jail banned a crawler; the report was withheld on purpose - [GOOD-BOTS.md](GOOD-BOTS.md) |
+| crawlers get 503 in the access log | `limit_req`, not fail2ban: throttling never bans, but it does slow the crawler down |
+
+A host-wide, read-only check of the whole picture (jails, banned addresses, ignoreip,
+per-bot status matrix, nginx rules that could catch a crawler):
+
+```bash
+bash tools/audit-good-bots.sh 7
+```
