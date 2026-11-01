@@ -85,7 +85,12 @@ class MetricsTests(TempDirTestCase):
         self.assertIn("abuseipdb_reporter_lease_held", names)
 
     def test_broken_queue_does_not_raise(self):
-        self.cfg.db_path = os.path.join(self.tmp, "nope", "???", "queue.sqlite3")
+        # A directory where the database is expected fails on every platform, while
+        # a path with "?" only fails on Windows - the test must mean the same thing
+        # on the Linux CI too.
+        broken = os.path.join(self.tmp, "a-directory")
+        os.makedirs(broken, exist_ok=True)
+        self.cfg.db_path = broken
         snapshot = metrics.build(self.cfg, now=int(time.time()))
         self.assertIn("error", snapshot)
         self.assertEqual(snapshot["pending_events"], 0)

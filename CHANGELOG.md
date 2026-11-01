@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.5.1] - 2026-11-01
+
+### Fixed
+
+* The template test needed PyYAML, which the project does not ship - CI failed on
+  ModuleNotFoundError: No module named 'yaml'. The test now checks the generated
+  file as text (item and trigger counts, the metric names against the collector, the
+  tags) and the real validation stays what it always was: importing the template into
+  Zabbix.
+* 	est_broken_queue_does_not_raise assumed a Windows-only failure (a path with
+  ?); it now points the queue at a directory, which fails on every platform.
+
+No runtime change: the code shipped in 1.5.0 is untouched.
+
 ## [1.5.0] - 2026-11-01
 
 ### Added
@@ -351,3 +365,4 @@ release ships the build pipeline, not new behaviour.
 [1.4.3]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.3
 [1.4.4]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.4
 [1.5.0]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.5.0
+[1.5.1]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.5.1
