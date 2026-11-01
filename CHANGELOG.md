@@ -58,7 +58,7 @@ No other change: the template, the agent key and the coordinator behave as in 1.
   file as text (item and trigger counts, the metric names against the collector, the
   tags) and the real validation stays what it always was: importing the template into
   Zabbix.
-* 	est_broken_queue_does_not_raise assumed a Windows-only failure (a path with
+* `test_broken_queue_does_not_raise` assumed a Windows-only failure (a path with
   ?); it now points the queue at a directory, which fails on every platform.
 
 No runtime change: the code shipped in 1.5.0 is untouched.
