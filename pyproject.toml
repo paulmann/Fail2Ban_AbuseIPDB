@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fail2ban-abuseipdb-reporter"
-version = "1.4.4"
+version = "1.5.0"
 description = "Asynchronous fail2ban to AbuseIPDB reporter: queues bans in SQLite and submits rich, evidence-backed abuse reports on a schedule."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -49,6 +49,7 @@ abuseipdb-report = "abuseipdb_reporter.cli:main_report"
 abuseipdb-enqueue = "abuseipdb_reporter.cli:main_enqueue"
 abuseipdb-upgrade = "abuseipdb_reporter.cli:main_upgrade"
 abuseipdb-coord = "abuseipdb_reporter.cli:main_coord"
+abuseipdb-witness = "abuseipdb_reporter.cli:main_witness"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

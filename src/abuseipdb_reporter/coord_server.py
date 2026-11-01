@@ -11,17 +11,21 @@ Run it next to the worker:
     abuseipdb-coord                  # serve on coord_bind:coord_port
 
 The endpoint is meant for a trusted network: see ``docs/COORDINATION.md`` for the
-firewall, TLS and failover rules.
+firewall, TLS and failover rules.  HTTPS is available without extra packages -
+set ``tls_cert``/``tls_key`` and the same socket is wrapped with the standard
+library ``ssl`` module.  ``GET /v1/health`` answers without the shared secret and
+is what a monitoring system should poll.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, List, Optional
 
-from . import __version__, coordination, db, log
+from . import __version__, coordination, db, log, metrics
 from .config import Config, load_config
 
 #: Refuse requests larger than this (a push batch is a few kilobytes).
@@ -31,6 +35,9 @@ SYNC_PATH = "/v1/sync"
 #: 1.3 name of the same endpoint; kept so an older follower keeps working.
 PUSH_PATH = "/v1/push"
 STATUS_PATH = "/v1/status"
+HEALTH_PATH = coordination.HEALTH_PATH
+#: How long the lease answer is reused inside the endpoint, seconds.
+LEASE_CACHE_TTL = 60
 
 
 class CoordHandler(BaseHTTPRequestHandler):
@@ -74,6 +81,15 @@ class CoordHandler(BaseHTTPRequestHandler):
         if not self._authorised():
             self._send(403, {"error": "forbidden"})
             return
+        if not self._may_lead():
+            self._send(
+                409,
+                {
+                    "error": "this node is not the leader right now",
+                    "lease": self._lease(),
+                },
+            )
+            return
         length = self._body_length()
         if length is None or length <= 0:
             self._send(400, {"error": "empty body"})
@@ -106,13 +122,43 @@ class CoordHandler(BaseHTTPRequestHandler):
         self._send(200, answer)
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib naming
-        if self._path() != STATUS_PATH:
+        path = self._path()
+        if path == HEALTH_PATH:
+            # No secret: a monitoring system must be able to ask "are you alive"
+            # without holding cluster credentials.  Nothing sensitive is returned.
+            self._send(200, dict(coordination.health_document(self.cfg), lease=self._lease()))
+            return
+        if path != STATUS_PATH:
             self._send(404, {"error": "not found"})
             return
         if not self._authorised():
             self._send(403, {"error": "forbidden"})
             return
         self._send(200, leader_status(self.cfg))
+
+    def _may_lead(self) -> bool:
+        """A candidate in ``auto`` mode must hold the lease before it accepts work."""
+        if coordination.mode_of(self.cfg) != coordination.MODE_AUTO:
+            return True
+        return bool(self._lease().get("effective") == coordination.MODE_LEADER)
+
+    def _lease(self) -> Dict:
+        """Cached view of the failover lease (empty when failover is manual)."""
+        cache = getattr(self.server, "lease_cache", None)
+        now = int(time.time())
+        if cache and now - int(cache.get("ts", 0)) < LEASE_CACHE_TTL:
+            return cache.get("value", {})
+        value: Dict = {}
+        if str(getattr(self.cfg, "failover", "none") or "none").lower() == "witness":
+            conn = db.connect(self.cfg.db_path)
+            try:
+                value = coordination.role_summary(self.cfg, conn=conn, now=now)
+            except Exception as error:  # noqa: BLE001 - health must answer anyway
+                value = {"error": repr(error)}
+            finally:
+                conn.close()
+        self.server.lease_cache = {"ts": now, "value": value}  # type: ignore[attr-defined]
+        return value
 
     def log_message(self, fmt: str, *args) -> None:  # noqa: A003 - stdlib hook
         """Silence the default per-request stderr log; the project log decides."""
@@ -123,15 +169,23 @@ def leader_status(cfg: Config) -> Dict[str, object]:
     """Small status document a follower can query with the same secret."""
     conn = db.connect(cfg.db_path)
     try:
+        snapshot = metrics.build(cfg, status_path=getattr(cfg, "status_path", ""))
         return {
             "ok": True,
             "role": "leader",
             "mode": coordination.mode_of(cfg),
+            "effective": coordination.effective_role(cfg, conn=conn),
             "node_id": cfg.node_id,
             "version": __version__,
+            "tls": bool(getattr(cfg, "tls_cert", "")),
             "pending": db.pending_count(conn),
             "unpushed": db.unpushed_count(conn),
             "sync_cursor": int(db.get_meta(conn, coordination.CURSOR_KEY, "0") or 0),
+            "reported_cache": int(snapshot.get("reported_cache_entries", 0)),
+            "reports_today": int(snapshot.get("reports_today", 0)),
+            "accepted_total": int(snapshot.get("accepted_total", 0)),
+            "rejected_total": int(snapshot.get("rejected_total", 0)),
+            "lease": coordination.role_summary(cfg, conn=conn).get("lease", {}),
         }
     finally:
         conn.close()
@@ -153,6 +207,13 @@ def make_server(
     number = int(port if port is not None else cfg.coord_port)
     server = ThreadingHTTPServer((bind, number), handler)
     server.daemon_threads = True
+    context = coordination._ssl_context(cfg, server_side=True)
+    if context is not None:
+        # Wrap after bind: the certificate is only loaded when both files exist.
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        server.tls = True  # type: ignore[attr-defined]
+    else:
+        server.tls = False  # type: ignore[attr-defined]
     return server
 
 
@@ -162,8 +223,14 @@ def serve(cfg: Config, host: Optional[str] = None, port: Optional[int] = None) -
     address = server.server_address
     log.log(
         cfg,
-        "coord: leader endpoint on %s:%s (mode=%s, node=%s)"
-        % (address[0], address[1], coordination.mode_of(cfg), cfg.node_id or "unset"),
+        "coord: leader endpoint on %s:%s%s (mode=%s, node=%s)"
+        % (
+            address[0],
+            address[1],
+            " with TLS" if getattr(server, "tls", False) else "",
+            coordination.mode_of(cfg),
+            cfg.node_id or "unset",
+        ),
     )
     if coordination.mode_of(cfg) != coordination.MODE_LEADER:
         log.log(

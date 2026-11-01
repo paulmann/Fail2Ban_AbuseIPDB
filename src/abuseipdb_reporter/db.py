@@ -171,6 +171,19 @@ def last_success(conn: sqlite3.Connection, ip: str) -> int:
     return int(row[0] or 0)
 
 
+def reports_today(conn: sqlite3.Connection, now: int, timezone: str = "utc") -> int:
+    """Reports accepted since the budget day started (same rule as the reporter)."""
+    import datetime
+
+    if str(timezone).strip().lower() in ("local", "localtime"):
+        moment = datetime.datetime.fromtimestamp(int(now))
+        start = int(moment.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+    else:
+        moment = datetime.datetime.fromtimestamp(int(now), tz=datetime.timezone.utc)
+        start = int(moment.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+    return reported_since(conn, start)
+
+
 def reported_since(conn: sqlite3.Connection, since: int) -> int:
     return int(
         conn.execute(

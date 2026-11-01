@@ -9,7 +9,7 @@
 set -euo pipefail
 
 PROG="$(basename "$0")"
-VERSION="1.4.4"
+VERSION="1.5.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 PREFIX="/usr/local"
@@ -258,7 +258,8 @@ check_layout() {
               systemd/abuseipdb-upgrade-check.service systemd/abuseipdb-upgrade-check.timer \
               cron/abuseipdb-upgrade-check updater.json \
               bin/abuseipdb-enqueue bin/abuseipdb-report bin/abuseipdb-upgrade \
-              bin/abuseipdb-coord systemd/abuseipdb-coord.service; do
+              bin/abuseipdb-coord systemd/abuseipdb-coord.service \
+              bin/abuseipdb-witness systemd/abuseipdb-witness.service; do
     if [ ! -e "$SCRIPT_DIR/$item" ]; then
       warn "missing project file: $item"
       missing=1
@@ -375,6 +376,7 @@ install_code() {
   install_file "$SCRIPT_DIR/bin/abuseipdb-report"  "$(path "$PREFIX/sbin/abuseipdb-report")"  755
   install_file "$SCRIPT_DIR/bin/abuseipdb-upgrade" "$(path "$PREFIX/sbin/abuseipdb-upgrade")" 755
   install_file "$SCRIPT_DIR/bin/abuseipdb-coord"   "$(path "$PREFIX/sbin/abuseipdb-coord")"   755
+  install_file "$SCRIPT_DIR/bin/abuseipdb-witness" "$(path "$PREFIX/sbin/abuseipdb-witness")" 755
 }
 
 install_config() {
@@ -449,6 +451,8 @@ install_scheduler() {
     # installed but never enabled: the coordination endpoint is opt-in (mode = leader)
     install_file "$SCRIPT_DIR/systemd/abuseipdb-coord.service" \
                  "$(path "/etc/systemd/system/abuseipdb-coord.service")" 644
+    install_file "$SCRIPT_DIR/systemd/abuseipdb-witness.service" \
+                 "$(path "/etc/systemd/system/abuseipdb-witness.service")" 644
     run systemctl daemon-reload
     run systemctl enable --now abuseipdb-report.timer
     info "systemd timer enabled: abuseipdb-report.timer (every 16 minutes)"
@@ -518,6 +522,7 @@ $(printf '%s' "$c_green")Fail2Ban_AbuseIPDB installed$(printf '%s' "$c_reset")
   code:      $PREFIX/lib/abuseipdb_reporter, $PREFIX/sbin/abuseipdb-report
              $PREFIX/sbin/abuseipdb-enqueue, $PREFIX/sbin/abuseipdb-upgrade
              $PREFIX/sbin/abuseipdb-coord (leader endpoint, opt-in)
+             $PREFIX/sbin/abuseipdb-witness (failover arbiter, opt-in)
   config:    /etc/abuseipdb/reporter.conf (mode 600)
   api key:   $KEY_FILE (mode 600, never overwritten by updates)
   queue:     /var/lib/abuseipdb/abuseipdb.sqlite3

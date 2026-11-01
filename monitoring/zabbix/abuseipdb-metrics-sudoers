@@ -1,0 +1,5 @@
+# /etc/sudoers.d/zabbix-abuseipdb   (mode 0440, owner root:root)
+# Only needed when the agent should ask the CLI directly instead of reading the
+# metrics file, for example when /var/lib/abuseipdb stays 0600 root:root.
+zabbix ALL=(root) NOPASSWD: /usr/local/sbin/abuseipdb-report --metrics
+zabbix ALL=(root) NOPASSWD: /usr/local/sbin/abuseipdb-report --stats

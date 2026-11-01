@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-from . import __version__, api, comments, coordination, db, evidence, log, status
+from . import __version__, api, comments, coordination, db, evidence, log, metrics, status
 from .config import Config
 
 #: injectable HTTP function signature: (url, api_key, fields, timeout) ->
@@ -110,6 +110,16 @@ def _publish(
         status.record(cfg, result, now=now, version=__version__)
     except Exception as error:  # noqa: BLE001 - monitoring must not break reporting
         log.log(cfg, "report: status write failed: %r" % (error,))
+    try:
+        snapshot = metrics.build(cfg, now=now, status_path=getattr(cfg, "status_path", ""))
+        path = getattr(cfg, "metrics_textfile", "")
+        if path:
+            status.write_text(path, metrics.prometheus(snapshot))
+        json_path = getattr(cfg, "metrics_json_path", "")
+        if json_path:
+            status.write_json(json_path, snapshot)
+    except Exception as error:  # noqa: BLE001 - monitoring must not break reporting
+        log.log(cfg, "report: metrics write failed: %r" % (error,))
 
 
 def _run_follower(
@@ -140,8 +150,14 @@ def _run_follower(
             result.stopped_reason = "follower (%s)" % synced.reason
             log.log(
                 cfg,
-                "coord: follower run done pushed=%d banned=%d pending=%d (%s)"
-                % (synced.pushed, synced.banned, synced.pending, synced.reason),
+                "coord: follower run done pushed=%d banned=%d pending=%d attempts=%d (%s)"
+                % (
+                    synced.pushed,
+                    synced.banned,
+                    synced.pending,
+                    synced.attempts,
+                    synced.reason,
+                ),
             )
         db.cleanup(conn, int(cfg.retention_days), now=now)
         result.pending = db.unpushed_count(conn)
@@ -171,7 +187,12 @@ def run_once(
         log.log(cfg, "report: disabled in config")
         _publish(cfg, result, now, dry_run=dry_run)
         return result
-    if coordination.is_follower(cfg):
+    try:
+        role = coordination.effective_role(cfg, now=now)
+    except Exception as error:  # noqa: BLE001 - never report on an unknown role
+        role = coordination.MODE_FOLLOWER
+        log.log(cfg, "report: role resolution failed (%r), acting as follower" % (error,))
+    if role == coordination.MODE_FOLLOWER:
         return _run_follower(cfg, result, now, dry_run, runner=runner)
     if not cfg.api_key and not dry_run:
         result.stopped_reason = "missing api key"

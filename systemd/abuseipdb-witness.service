@@ -1,0 +1,48 @@
+[Unit]
+Description=Fail2Ban_AbuseIPDB failover arbiter (leadership lease)
+Documentation=file:/etc/abuseipdb/reporter.conf
+After=network-online.target
+Wants=network-online.target
+# Installed but NOT enabled. Run it only when [coordination] failover = witness,
+# and preferably on a host that is not one of the reporter nodes, so the arbiter
+# and the leader cannot die together.
+#
+# The state file is what stops a restart from handing leadership to a second node:
+# StateDirectory gives /var/lib/abuseipdb-witness, the lease file lives there.
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/abuseipdb-witness
+Restart=on-failure
+RestartSec=5s
+
+StateDirectory=abuseipdb-witness
+StateDirectoryMode=0700
+
+# The arbiter holds a lease and nothing else: no queue, no key, no network egress.
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Tunables:
+#   IPAddressAllow=10.0.0.0/8 192.168.0.0/16   # only the candidates may ask
+ReadWritePaths=/var/lib/abuseipdb-witness
+
+[Install]
+WantedBy=multi-user.target

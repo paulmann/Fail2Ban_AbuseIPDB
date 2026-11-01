@@ -62,7 +62,9 @@ BUDGET_TIMEZONES = ("utc", "local")
 
 #: Coordination roles: ``none`` (standalone), ``leader`` (reports and accepts
 #: pushed events) and ``follower`` (only pushes events to the leader).
-COORDINATION_MODES = ("none", "leader", "follower")
+COORDINATION_MODES = ("none", "leader", "follower", "auto")
+#: Failover strategies: ``none`` (manual) or ``witness`` (an arbiter grants the lease).
+FAILOVER_MODES = ("none", "witness")
 
 #: Ranges that must never be reported: our own/trusted hosts, private,
 #: loopback, reserved and documentation networks.
@@ -104,6 +106,12 @@ def _as_timezone(value, default: str = "utc") -> str:
     if text in ("server", "system", "localtime"):
         return "local"
     return default
+
+
+def _as_failover(value, default: str = "none") -> str:
+    """Normalise ``coordination.failover``; an unknown strategy means manual."""
+    text = str(value or "").strip().lower()
+    return text if text in FAILOVER_MODES else default
 
 
 def _as_mode(value, default: str = "none") -> str:
@@ -176,6 +184,27 @@ class Config:
     peer_dedupe_window: int = 900
     #: Leader: how many bans one sync answer may carry.
     max_sync_bans: int = 50
+    #: ``none`` (manual failover) or ``witness`` (an arbiter grants the lease).
+    failover: str = "none"
+    witness_url: str = ""
+    witness_timeout: int = 5
+    lease_ttl: int = 1800
+    lease_state_path: str = "/var/lib/abuseipdb/witness-lease.json"
+    #: Follower: attempts per run and the base delay of the exponential backoff.
+    sync_attempts: int = 3
+    sync_retry_base: float = 1.0
+    #: TLS for the coordinator endpoint (server side) and for syncs (client side).
+    tls_cert: str = ""
+    tls_key: str = ""
+    tls_client_ca: str = ""
+    tls_ca: str = ""
+    tls_verify: bool = True
+    tls_client_cert: str = ""
+    tls_client_key: str = ""
+    #: Prometheus textfile with the full snapshot (queue, coordination, lease).
+    metrics_textfile: str = "/var/lib/abuseipdb/metrics.prom"
+    #: JSON snapshot of the same numbers; ``--metric`` reads it (monitoring agents).
+    metrics_json_path: str = "/var/lib/abuseipdb/metrics.json"
     #: Empty by default: a directly constructed Config (tests, embedders) must
     #: not write files outside its own directory.  ``load_config`` fills the
     #: default path from ``[logging] status_path``.
@@ -276,6 +305,28 @@ def load_config(path: Optional[str] = None, quiet: bool = False) -> Config:
             300, _as_int(get("coordination", "peer_dedupe_window", "900"), 900)
         ),
         max_sync_bans=max(1, _as_int(get("coordination", "max_sync_bans", "50"), 50)),
+        failover=_as_failover(get("coordination", "failover", "none")),
+        witness_url=get("coordination", "witness_url", "").strip(),
+        witness_timeout=max(1, _as_int(get("coordination", "witness_timeout", "5"), 5)),
+        lease_ttl=max(60, _as_int(get("coordination", "lease_ttl", "1800"), 1800)),
+        lease_state_path=get(
+            "coordination", "lease_state_path", "/var/lib/abuseipdb/witness-lease.json"
+        ).strip(),
+        sync_attempts=min(10, max(1, _as_int(get("coordination", "sync_attempts", "3"), 3))),
+        sync_retry_base=max(0.0, _as_float(get("coordination", "sync_retry_base", "1"), 1.0)),
+        tls_cert=get("coordination", "tls_cert", "").strip(),
+        tls_key=get("coordination", "tls_key", "").strip(),
+        tls_client_ca=get("coordination", "tls_client_ca", "").strip(),
+        tls_ca=get("coordination", "tls_ca", "").strip(),
+        tls_verify=_as_bool(get("coordination", "tls_verify", "yes"), True),
+        tls_client_cert=get("coordination", "tls_client_cert", "").strip(),
+        tls_client_key=get("coordination", "tls_client_key", "").strip(),
+        metrics_textfile=get(
+            "abuseipdb", "metrics_textfile", "/var/lib/abuseipdb/metrics.prom"
+        ).strip(),
+        metrics_json_path=get(
+            "abuseipdb", "metrics_json_path", "/var/lib/abuseipdb/metrics.json"
+        ).strip(),
         status_path=get("logging", "status_path", DEFAULT_STATUS_PATH).strip(),
         prometheus_textfile=get("logging", "prometheus_textfile", "").strip(),
         ignore_ranges=parse_ranges(ranges_raw),

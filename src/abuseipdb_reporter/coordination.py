@@ -5,7 +5,7 @@ that talks to the API; the others push their ban events to it.  Every sync is a
 two-way exchange:
 
 ```
-follower ──POST /v1/sync {node_id, events, since}──► leader
+follower ──POST /v1/sync {node_id, events, since, jails}──► leader
          ◄──── {accepted, inserted, rejected,
                 recently_reported: {ip: ts},      # do not report these again
                 to_ban: [{ip, jail}],             # ban them here as well
@@ -20,18 +20,20 @@ follower ──POST /v1/sync {node_id, events, since}──► leader
   after it and never echoes a ban back to the node it came from.
 
 Roles: ``none`` (standalone, the default), ``leader`` (reports and serves
-``abuseipdb-coord``), ``follower`` (pushes, applies remote bans, never reports).
+``abuseipdb-coord``), ``follower`` (pushes, applies remote bans, never reports),
+``auto`` (candidate: leader while it holds the failover lease, follower otherwise).
 
-Failover stays **manual** on purpose.  A lease on shared storage looks automatic
-but cannot be made safe without an atomic compare-and-swap: two nodes renewing a
-file lease concurrently both believe they are the leader, and a split brain
-spends the account budget twice and breaks the per-IP interval. Moving the key
-and flipping ``mode`` is slower and always correct.
+Failover: manual by default.  With ``failover = witness`` the role is decided by
+:mod:`abuseipdb_reporter.witness` - one small arbiter that hands the lease to a
+single node at a time and can only *grant* it.  A lease that cannot be renewed
+expires; an expired lease means "follower", never "leader", so a lost witness can
+never produce two leaders.  There is deliberately no file lease: two nodes renewing
+a shared file concurrently both believe they are the leader.
 
 Security notes: the shared secret is compared in constant time; the endpoint is
-plain HTTP by design (bind it privately or put TLS in front); remote bans are
-filtered against ``[ignore] ranges`` and the node's own ``server_ip``, capped per
-run, and can never be un-bans.
+plain HTTP unless ``tls_cert``/``tls_key`` are configured (stdlib TLS, optional
+client certificates); remote bans are filtered against ``[ignore] ranges`` and the
+node's own ``server_ip``, capped per run, and can never be un-bans.
 """
 from __future__ import annotations
 
@@ -39,6 +41,7 @@ import dataclasses
 import hmac
 import json
 import re
+import ssl
 import subprocess
 import time
 import urllib.error
@@ -48,17 +51,12 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import db, iputil, log
 from .config import Config
+from .witness_client import lease_state
 
 MODE_NONE = "none"
 MODE_LEADER = "leader"
 MODE_FOLLOWER = "follower"
-
-#: meta key holding the follower's sync cursor
-CURSOR_KEY = "coord_since"
-#: meta key caching the jail list this node can actually ban in
-JAILS_KEY = "coord_jails"
-#: how long the cached jail list is trusted, seconds
-JAILS_TTL = 3600
+MODE_AUTO = "auto"
 
 #: Upper bound on how many events one push may carry (follower side).
 MAX_EVENTS_PER_PUSH = 500
@@ -70,11 +68,37 @@ MAX_REMOTE_BANS = 200
 DEFAULT_TIMEOUT = 20
 #: A ban older than this is not worth propagating (the attacker is long gone).
 MAX_PROPAGATION_AGE = 2 * 3600
-USER_AGENT = "fail2ban-abuseipdb-coord/1.4"
+USER_AGENT = "fail2ban-abuseipdb-coord/1.5"
 #: Jail names fail2ban accepts; anything else is never passed to the CLI.
 JAIL_RE = re.compile(r"^[A-Za-z0-9._@-]{1,64}$")
 #: Runner signature: (argv, timeout) -> (returncode, stdout, stderr)
 Runner = Callable[..., Tuple[int, str, str]]
+
+#: meta key holding the follower's sync cursor
+CURSOR_KEY = "coord_since"
+#: meta key caching the jail list this node can actually ban in
+JAILS_KEY = "coord_jails"
+#: meta keys used by the monitoring snapshot
+LAST_SYNC_KEY = "coord_last_sync"
+LAST_SYNC_OK_KEY = "coord_last_sync_ok"
+SYNC_FAILURES_KEY = "coord_sync_failures"
+ACCEPTED_KEY = "coord_accepted_total"
+INSERTED_KEY = "coord_inserted_total"
+REJECTED_KEY = "coord_rejected_total"
+REMOTE_BANS_KEY = "coord_remote_bans_total"
+LEASE_KEY = "coord_lease_owner"
+LEASE_EXPIRES_KEY = "coord_lease_expires"
+#: how long the cached jail list is trusted, seconds
+JAILS_TTL = 3600
+#: a cached jail list older than this is not trusted at all
+JAILS_MAX_AGE = 24 * 3600
+#: Route names, kept short because they are typed into firewalls and proxies.
+SYNC_PATH = "/v1/sync"
+#: 1.3 name of the same endpoint; kept so an older follower keeps working.
+PUSH_PATH = "/v1/push"
+STATUS_PATH = "/v1/status"
+#: Unauthenticated liveness endpoint for monitoring and alerting.
+HEALTH_PATH = "/v1/health"
 
 
 @dataclasses.dataclass
@@ -87,11 +111,16 @@ class SyncResult:
     pending: int = 0
     reason: str = ""
     next_since: int = 0
+    attempts: int = 0
 
 
 def mode_of(cfg: Config) -> str:
-    """Effective coordination role of this node."""
+    """Configured coordination role of this node."""
     return str(getattr(cfg, "coordination_mode", MODE_NONE) or MODE_NONE).strip().lower()
+
+
+def is_auto(cfg: Config) -> bool:
+    return mode_of(cfg) == MODE_AUTO
 
 
 def is_follower(cfg: Config) -> bool:
@@ -100,6 +129,34 @@ def is_follower(cfg: Config) -> bool:
 
 def is_leader(cfg: Config) -> bool:
     return mode_of(cfg) == MODE_LEADER
+
+
+def effective_role(cfg: Config, conn=None, now: Optional[int] = None) -> str:
+    """Role this node must act as right now.
+
+    ``auto`` resolves through the failover lease: only the node that holds an
+    unexpired lease reports.  Every other answer - no witness, a broken witness, an
+    expired lease - is ``follower``, because "do not report" is the safe side.
+    """
+    mode = mode_of(cfg)
+    if mode not in (MODE_AUTO,):
+        return mode
+    moment = int(now if now is not None else time.time())
+    if str(getattr(cfg, "failover", "none") or "none").lower() != "witness":
+        return MODE_FOLLOWER
+    own_conn = False
+    if conn is None:
+        try:
+            conn = db.connect(cfg.db_path)
+            own_conn = True
+        except Exception:  # noqa: BLE001 - no queue means no lease memory
+            return MODE_FOLLOWER
+    try:
+        state = lease_state(cfg, conn, now=moment)
+    finally:
+        if own_conn and conn is not None:
+            conn.close()
+    return MODE_LEADER if state.get("held") else MODE_FOLLOWER
 
 
 def load_secret(path: str) -> str:
@@ -121,35 +178,54 @@ def _local_jails(
     A follower that does not have a jail cannot apply a ban for it:
     ``fail2ban-client`` answers ``NOK: unable to find jail``, which becomes a logged
     error per address on every sync.  Declaring the list keeps the leader from
-    sending what would only fail here.  An empty list means "unknown"
-    (fail2ban-client missing or no output) and makes the leader send everything,
-    exactly as in 1.4.0.
+    sending what would only fail here.
+
+    A failed ``fail2ban-client status`` never overwrites a good list: the previous
+    answer stays valid for up to :data:`JAILS_MAX_AGE`, so a transient fail2ban
+    restart does not turn into "declare nothing" and a flood of bans for jails this
+    node does have.  An empty answer is remembered for one TTL so a host with no
+    jails is not re-queried on every sync.
     """
     moment = int(now if now is not None else time.time())
     cached = db.get_meta(conn, JAILS_KEY, "")
-    if cached:
-        stamp, _, names = cached.partition("|")
-        try:
-            fresh = moment - int(stamp) < JAILS_TTL
-        except ValueError:
-            fresh = False
-        if fresh:
-            return [name for name in names.split(",") if name]
+    stamp, _, names = cached.partition("|")
+    age = moment - int(stamp) if stamp.isdigit() else None
+    if age is not None and age < JAILS_TTL:
+        return [name for name in names.split(",") if name]
+
     run = runner or _fail2ban_runner
-    code, out, _ = run(["fail2ban-client", "status"], 12)
+    code, out, err = run(["fail2ban-client", "status"], 12)
     if code != 0 or not out:
+        if age is not None and age < JAILS_MAX_AGE:
+            log.log(
+                cfg,
+                "coord: fail2ban-client status failed (%s), keeping the jail list from %d s ago"
+                % ((err or "").strip()[:120] or "no output", age),
+            )
+            return [name for name in names.split(",") if name]
         return []
-    names: List[str] = []
+
+    parsed: List[str] = []
     for line in out.splitlines():
         if "Jail list:" in line:
             _, _, tail = line.partition("Jail list:")
-            names = [
+            parsed = [
                 item.strip() for item in tail.replace("\t", " ").split(",") if item.strip()
             ]
             break
-    names = [name for name in names if JAIL_RE.match(name)]
-    db.set_meta(conn, JAILS_KEY, "%d|%s" % (moment, ",".join(names)))
-    return names
+    parsed = [name for name in parsed if JAIL_RE.match(name)]
+    if parsed or age is None:
+        # a non-empty answer always wins; an empty one only when nothing is known
+        db.set_meta(conn, JAILS_KEY, "%d|%s" % (moment, ",".join(parsed)))
+        return parsed
+    if age is not None and age < JAILS_MAX_AGE:
+        log.log(
+            cfg,
+            "coord: fail2ban-client returned an empty jail list, keeping the previous one",
+        )
+        return [name for name in names.split(",") if name]
+    db.set_meta(conn, JAILS_KEY, "%d|" % moment)
+    return []
 
 
 def events_to_payload(rows: Sequence) -> List[Dict[str, int]]:
@@ -168,20 +244,76 @@ def events_to_payload(rows: Sequence) -> List[Dict[str, int]]:
     return payload
 
 
-class LeaderClient:
-    """HTTP client a follower uses to reach its leader."""
+def _ssl_context(cfg: Config, server_side: bool, cafile: str = "") -> Optional[ssl.SSLContext]:
+    """Build a TLS context from the configuration, or ``None`` for plain HTTP.
 
-    def __init__(self, url: str, secret: str, timeout: int = DEFAULT_TIMEOUT):
+    ``cafile`` (client side) is ``tls_ca`` or the certificate itself when it is
+    self-signed; ``tls_verify = no`` disables verification and is only meant for a
+    test rig, because it also disables hostname checks.
+    """
+    cert = str(getattr(cfg, "tls_cert", "") or "")
+    key = str(getattr(cfg, "tls_key", "") or "")
+    if server_side:
+        if not cert or not key:
+            return None
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain(cert, key)
+        client_ca = str(getattr(cfg, "tls_client_ca", "") or "")
+        if client_ca:
+            context.verify_mode = ssl.CERT_REQUIRED
+            context.load_verify_locations(cafile=client_ca)
+        return context
+
+    scheme = urllib.parse.urlsplit(str(getattr(cfg, "leader_url", "") or "")).scheme.lower()
+    if scheme != "https":
+        return None
+    if not bool(getattr(cfg, "tls_verify", True)):
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    else:
+        context = ssl.create_default_context()
+    material = cafile or str(getattr(cfg, "tls_ca", "") or "")
+    if material:
+        context.load_verify_locations(cafile=material)
+    client_cert = str(getattr(cfg, "tls_client_cert", "") or "")
+    client_key = str(getattr(cfg, "tls_client_key", "") or "")
+    if client_cert and client_key:
+        context.load_cert_chain(client_cert, client_key)
+    return context
+
+
+class LeaderClient:
+    """HTTP(S) client a follower uses to reach its leader."""
+
+    def __init__(
+        self,
+        url: str,
+        secret: str,
+        timeout: int = DEFAULT_TIMEOUT,
+        context: Optional[ssl.SSLContext] = None,
+    ):
         self.url = str(url or "").rstrip("/")
         self.secret = secret
         self.timeout = int(timeout or DEFAULT_TIMEOUT)
+        self.context = context
 
     def _url_ok(self) -> bool:
         parts = urllib.parse.urlsplit(self.url)
         return parts.scheme.lower() in ("http", "https") and bool(parts.netloc)
 
+    def _open(self, request):
+        if self.context is not None:
+            return urllib.request.urlopen(request, timeout=self.timeout, context=self.context)
+        return urllib.request.urlopen(request, timeout=self.timeout)
+
     def sync(
-        self, node_id: str, events: Sequence[Dict], since: int = 0, jails: Optional[Sequence[str]] = None
+        self,
+        node_id: str,
+        events: Sequence[Dict],
+        since: int = 0,
+        jails: Optional[Sequence[str]] = None,
     ) -> Tuple[bool, Dict]:
         """POST one sync request.  Returns ``(delivered, response)``."""
         if not self._url_ok():
@@ -197,7 +329,7 @@ class LeaderClient:
             payload["jails"] = [str(name) for name in jails]
         data = json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
-            "%s/v1/sync" % self.url,
+            "%s%s" % (self.url, SYNC_PATH),
             data=data,
             headers={
                 "Content-Type": "application/json",
@@ -207,7 +339,7 @@ class LeaderClient:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with self._open(request) as response:
                 body = response.read().decode("utf-8", "replace")
                 return response.status == 200, _json_or_empty(body)
         except urllib.error.HTTPError as error:
@@ -217,22 +349,35 @@ class LeaderClient:
                 detail = ""
             return False, {"error": "HTTP %s: %s" % (error.code, detail)}
         except Exception as error:  # noqa: BLE001 - transport errors are reported as-is
-            return False, {"error": repr(error)}
+            return False, {"error": repr(error), "retryable": _retryable(error)}
 
     def get_status(self) -> Optional[Dict]:
         """Fetch the leader's status document (``None`` on any failure)."""
+        return self.get_json(STATUS_PATH)
+
+    def get_health(self) -> Optional[Dict]:
+        """Fetch the unauthenticated health document (``None`` on any failure)."""
+        return self.get_json(HEALTH_PATH, authenticated=False)
+
+    def get_json(self, path: str, authenticated: bool = True) -> Optional[Dict]:
         if not self._url_ok():
             return None
-        request = urllib.request.Request(
-            "%s/v1/status" % self.url,
-            headers={"X-Coord-Secret": self.secret, "User-Agent": USER_AGENT},
-            method="GET",
-        )
+        headers = {"User-Agent": USER_AGENT}
+        if authenticated:
+            headers["X-Coord-Secret"] = self.secret
+        request = urllib.request.Request("%s%s" % (self.url, path), headers=headers, method="GET")
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with self._open(request) as response:
                 return _json_or_empty(response.read().decode("utf-8", "replace"))
         except Exception:  # noqa: BLE001 - status is informational only
             return None
+
+
+def _retryable(error: Exception) -> bool:
+    """Whether a transport error is worth another attempt inside the same run."""
+    if isinstance(error, urllib.error.HTTPError):
+        return int(getattr(error, "code", 0) or 0) >= 500
+    return isinstance(error, (urllib.error.URLError, TimeoutError, OSError))
 
 
 def _json_or_empty(text: str) -> Dict:
@@ -270,6 +415,7 @@ def apply_remote_bans(
     items: Sequence,
     limit: Optional[int] = None,
     runner: Optional[Runner] = None,
+    conn=None,
 ) -> int:
     """Ban addresses a peer reported.  Returns how many were applied.
 
@@ -310,14 +456,26 @@ def apply_remote_bans(
             applied += 1
             log.log(cfg, "coord: remote ban applied %s in %s" % (text, jail))
         else:
-            # "already banned" is the normal answer for a repeated sync
             detail = (err or out or "").strip().splitlines()
             log.log(
                 cfg,
                 "coord: remote ban not applied %s in %s: rc=%s %s"
                 % (text, jail, code, (detail[-1] if detail else "")[:160]),
             )
+    if applied and conn is not None:
+        _bump(conn, REMOTE_BANS_KEY, applied)
     return applied
+
+
+def _bump(conn, key: str, delta: int) -> None:
+    """Increase a cumulative counter stored in ``meta``."""
+    if delta <= 0:
+        return
+    try:
+        current = int(db.get_meta(conn, key, "0") or 0)
+        db.set_meta(conn, key, current + int(delta))
+    except Exception:  # noqa: BLE001 - metrics must never break the run
+        pass
 
 
 def pending_batch(cfg: Config, conn) -> List[Dict[str, int]]:
@@ -327,11 +485,24 @@ def pending_batch(cfg: Config, conn) -> List[Dict[str, int]]:
 
 
 def follower_sync(
-    cfg: Config, conn, runner: Optional[Runner] = None, now: Optional[int] = None
+    cfg: Config,
+    conn,
+    runner: Optional[Runner] = None,
+    now: Optional[int] = None,
+    sleep: Optional[Callable[[float], None]] = None,
 ) -> SyncResult:
-    """Follower path: one two-way sync with the leader."""
+    """Follower path: one two-way sync with the leader, retried with backoff.
+
+    A failed attempt is retried ``sync_attempts`` times inside the same run with an
+    exponential delay (``sync_retry_base`` doubling, capped by ``timeout``).  The
+    events are only marked delivered when the leader answered, so a run that gives
+    up leaves everything queued for the next timer tick - a leader outage delays
+    reports, it never loses them.  The failure is counted, so monitoring can alert
+    before the queue is huge.
+    """
     result = SyncResult()
     moment = int(now if now is not None else time.time())
+    wait = sleep or time.sleep
     secret = load_secret(getattr(cfg, "shared_secret_file", ""))
     if not secret:
         result.reason = "missing shared secret (%s)" % (getattr(cfg, "shared_secret_file", ""),)
@@ -352,22 +523,61 @@ def follower_sync(
     rows = db.pending_events_for_push(
         conn, min(int(getattr(cfg, "push_batch_size", 50) or 50), MAX_EVENTS_PER_PUSH)
     )
-    jails = _local_jails(cfg, conn, runner=runner, now=moment) if getattr(cfg, "sync_bans", True) else []
-    client = LeaderClient(cfg.leader_url, secret, timeout=int(cfg.timeout))
-    delivered, response = client.sync(
-        cfg.node_id or "unknown", events_to_payload(rows), since, jails=jails
+    jails = (
+        _local_jails(cfg, conn, runner=runner, now=moment)
+        if getattr(cfg, "sync_bans", True)
+        else []
     )
+    client = LeaderClient(
+        cfg.leader_url,
+        secret,
+        timeout=int(cfg.timeout),
+        context=_ssl_context(cfg, server_side=False),
+    )
+
+    attempts = max(1, int(getattr(cfg, "sync_attempts", 3) or 1))
+    base = max(0.0, float(getattr(cfg, "sync_retry_base", 1.0) or 0.0))
+    delivered = False
+    response: Dict = {}
+    for attempt in range(1, attempts + 1):
+        result.attempts = attempt
+        delivered, response = client.sync(
+            cfg.node_id or "unknown", events_to_payload(rows), since, jails=jails
+        )
+        if delivered:
+            break
+        retryable = response.get("retryable", True)
+        if attempt >= attempts or not retryable:
+            break
+        delay = min(base * (2 ** (attempt - 1)), max(base, 1.0) * 8)
+        log.log(
+            cfg,
+            "coord: sync attempt %d/%d failed (%s), retrying in %.1f s"
+            % (attempt, attempts, str(response.get("error"))[:120], delay),
+        )
+        if delay > 0:
+            wait(delay)
+
     if not delivered:
         result.reason = str(response.get("error") or "sync failed")[:200]
         result.pending = db.unpushed_count(conn)
-        log.log(cfg, "coord: sync failed: %s" % result.reason)
+        failures = int(db.get_meta(conn, SYNC_FAILURES_KEY, "0") or 0) + 1
+        db.set_meta(conn, SYNC_FAILURES_KEY, failures)
+        db.set_meta(conn, LAST_SYNC_OK_KEY, 0)
+        log.log(
+            cfg,
+            "coord: sync failed after %d attempt(s): %s (consecutive failures: %d)"
+            % (result.attempts, result.reason, failures),
+        )
         return result
 
     if rows:
         result.pushed = db.mark_pushed(conn, [row["id"] for row in rows])
 
     if getattr(cfg, "sync_bans", True):
-        result.banned = apply_remote_bans(cfg, response.get("to_ban") or [], runner=runner)
+        result.banned = apply_remote_bans(
+            cfg, response.get("to_ban") or [], runner=runner, conn=conn
+        )
 
     result.merged = db.merge_reported(
         conn, response.get("recently_reported") or {}, source="leader", now=moment
@@ -377,12 +587,16 @@ def follower_sync(
         db.set_meta(conn, CURSOR_KEY, next_since)
         result.next_since = next_since
 
+    db.set_meta(conn, LAST_SYNC_KEY, moment)
+    db.set_meta(conn, LAST_SYNC_OK_KEY, 1)
+    db.set_meta(conn, SYNC_FAILURES_KEY, 0)
+
     result.pending = db.unpushed_count(conn)
     result.reason = "ok"
     log.log(
         cfg,
-        "coord: sync ok pushed=%d remote_bans=%d cache+%d pending=%d"
-        % (result.pushed, result.banned, result.merged, result.pending),
+        "coord: sync ok pushed=%d remote_bans=%d cache+%d pending=%d attempts=%d"
+        % (result.pushed, result.banned, result.merged, result.pending, result.attempts),
     )
     return result
 
@@ -398,8 +612,8 @@ def accept_events(cfg: Config, events: Sequence, node_id: str = "") -> Dict[str,
 
     The leader applies **the same** filters as its own enqueue path (invalid
     address, ignored ranges, skipped jails), so a follower cannot smuggle in an
-    address the leader would never report.  Duplicates collapse through the
-    normal 5-minute window in :func:`db.enqueue`.
+    address the leader would never report.  Duplicates collapse through the normal
+    5-minute window in :func:`db.enqueue`.
     """
     accepted = inserted = rejected = 0
     conn = db.connect(cfg.db_path)
@@ -431,6 +645,9 @@ def accept_events(cfg: Config, events: Sequence, node_id: str = "") -> Dict[str,
                 origin=str(node_id or "")[:64],
             ):
                 inserted += 1
+        _bump(conn, ACCEPTED_KEY, accepted)
+        _bump(conn, INSERTED_KEY, inserted)
+        _bump(conn, REJECTED_KEY, rejected)
     finally:
         conn.close()
     log.log(
@@ -487,6 +704,37 @@ def sync_response(
         }
     )
     return payload
+
+
+def health_document(cfg: Config, now: Optional[int] = None) -> Dict:
+    """Small document for monitoring - safe without the shared secret.
+
+    It answers "is this endpoint alive, which role does it serve and is the lease
+    held" and never exposes the queue, the key or the secret, so a firewall or a
+    Zabbix host can poll it from an untrusted network.
+    """
+    moment = int(now if now is not None else time.time())
+    return {
+        "ok": True,
+        "role": "leader",
+        "mode": mode_of(cfg),
+        "node_id": str(getattr(cfg, "node_id", "") or ""),
+        "version": _version(),
+        "tls": bool(getattr(cfg, "tls_cert", "")),
+        "time": moment,
+    }
+
+
+def role_summary(cfg: Config, conn=None, now: Optional[int] = None) -> Dict:
+    """Role, lease and readiness in one dict (used by ``--coord-status``)."""
+    moment = int(now if now is not None else time.time())
+    state = lease_state(cfg, conn, now=moment) if conn is not None else {"held": False}
+    return {
+        "mode": mode_of(cfg),
+        "effective": effective_role(cfg, conn=conn, now=moment),
+        "failover": str(getattr(cfg, "failover", "none") or "none"),
+        "lease": state,
+    }
 
 
 def _version() -> str:

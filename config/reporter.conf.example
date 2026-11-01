@@ -51,6 +51,9 @@ evidence_max_lines = 4
 # bans already reported by more specific jails).
 skip_jails = recidive
 
+# Prometheus textfile with the full snapshot; also printed by --metrics.
+metrics_textfile = /var/lib/abuseipdb/metrics.prom
+
 [database]
 # Local queue and report journal (SQLite, WAL).
 path = /var/lib/abuseipdb/abuseipdb.sqlite3
@@ -131,6 +134,39 @@ peer_dedupe_window = 900
 
 # Leader: how many bans one sync answer may carry.
 max_sync_bans = 50
+
+# Follower: attempts per run before giving up until the next tick, and the base
+# delay of the exponential backoff between them (seconds).
+sync_attempts = 3
+sync_retry_base = 1.0
+
+# --- optional TLS (stdlib ssl, no extra packages) ---------------------------
+# Server side (leader endpoint): set both to switch the listener to HTTPS.
+#tls_cert = /etc/abuseipdb/tls/cert.pem
+#tls_key = /etc/abuseipdb/tls/key.pem
+# Require a client certificate as well (mTLS); the CA that signed the followers.
+#tls_client_ca = /etc/abuseipdb/tls/ca.pem
+# Client side (follower): verify the leader certificate. tls_ca is the CA (or the
+# self-signed certificate); tls_verify = no disables checks - test rigs only.
+#tls_ca = /etc/abuseipdb/tls/ca.pem
+tls_verify = yes
+# Mutual TLS from the follower side.
+#tls_client_cert = /etc/abuseipdb/tls/client.pem
+#tls_client_key = /etc/abuseipdb/tls/client-key.pem
+
+# --- optional automatic failover (witness arbiter) -------------------------
+# none   - manual failover (default): move the key, change mode, restart
+# witness - a small arbiter grants a time-limited lease; the holder is the leader
+failover = none
+# Where the arbiter listens (abuseipdb-witness on a third host).
+witness_url =
+witness_timeout = 5
+# Lease length in seconds; it must exceed the timer interval, because the lease is
+# renewed on every run. A lease that cannot be renewed runs out - an expired lease
+# means "follower", never "leader".
+lease_ttl = 1800
+# Arbiter state file (survives a restart, so leadership is not handed out twice).
+lease_state_path = /var/lib/abuseipdb/witness-lease.json
 
 [ignore]
 # Never report these addresses: our own and trusted hosts, private, loopback,

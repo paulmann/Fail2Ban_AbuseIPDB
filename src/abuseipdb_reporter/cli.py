@@ -8,7 +8,20 @@ import sys
 import tempfile
 from typing import List, Optional
 
-from . import __version__, api, coordination, db, enqueue, keys, log, reporter, status
+from . import (
+    __version__,
+    api,
+    coordination,
+    db,
+    enqueue,
+    keys,
+    log,
+    metrics,
+    reporter,
+    status,
+    witness,
+    witness_client,
+)
 from .config import Config, load_config
 
 #: Lock locations tried in order; the first writable one wins.  ``/run`` is the
@@ -103,21 +116,83 @@ def _stats_text(cfg: Config) -> str:
     return "\n".join(lines)
 
 
+def monitoring_value(cfg: Config, name: str):
+    """One value from the JSON snapshot the reporter writes on every run.
+
+    Reading the snapshot keeps a monitoring poll cheap (no database open) and keeps
+    every item consistent with the same run.  When the file is missing - a host that
+    has never reported - the snapshot is computed live so the item answers with
+    zeros instead of "unsupported".
+    """
+    key = str(name or "").strip()
+    snapshot = metrics.read_snapshot(getattr(cfg, "metrics_json_path", "") or "")
+    if not snapshot:
+        snapshot = metrics.build(cfg, status_path=getattr(cfg, "status_path", ""))
+    if key in snapshot:
+        return snapshot[key]
+    # accept the Prometheus name too: abuseipdb_reporter_pending_events
+    prefix = metrics.PREFIX + "_"
+    if key.startswith(prefix):
+        key = key[len(prefix):]
+    value = snapshot.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return 1 if value else 0
+    return value
+
+
 def _coord_status(cfg: Config) -> int:
-    """Show the coordination role and, for a follower, the leader's own status."""
+    """Show the role, the lease, and what the leader answers - one screen.
+
+    ``auto`` nodes print both the configured mode and the role they act as right
+    now, because that is what decides whether reports leave the host.
+    """
     mode = coordination.mode_of(cfg)
     print("mode: %s" % mode)
     print("node_id: %s" % (cfg.node_id or "(unset)"))
-    if mode == coordination.MODE_FOLLOWER:
+    print("failover: %s" % (getattr(cfg, "failover", "none") or "none"))
+    conn = db.connect(cfg.db_path)
+    try:
+        summary = coordination.role_summary(cfg, conn=conn)
+        lease = summary.get("lease") or {}
+    finally:
+        conn.close()
+    print("effective role: %s" % summary.get("effective", mode))
+    if lease:
+        print(
+            "lease: held=%s owner=%s expires=%s source=%s"
+            % (
+                lease.get("held"),
+                lease.get("owner") or "-",
+                lease.get("expires") or "-",
+                lease.get("source") or "-",
+            )
+        )
+        if lease.get("error"):
+            print("lease error: %s" % lease["error"])
+
+    follower = summary.get("effective") == coordination.MODE_FOLLOWER
+    secret = coordination.load_secret(cfg.shared_secret_file)
+    if follower:
         print("leader_url: %s" % (cfg.leader_url or "(unset)"))
-        secret = coordination.load_secret(cfg.shared_secret_file)
         print(
             "secret: %s"
             % ("present" if secret else "MISSING (%s)" % cfg.shared_secret_file)
         )
         if not secret or not cfg.leader_url:
             return 2
-        client = coordination.LeaderClient(cfg.leader_url, secret, timeout=int(cfg.timeout))
+        client = coordination.LeaderClient(
+            cfg.leader_url,
+            secret,
+            timeout=int(cfg.timeout),
+            context=coordination._ssl_context(cfg, server_side=False),
+        )
+        health = client.get_health()
+        print(
+            "leader health: %s"
+            % (json.dumps(health, ensure_ascii=False, sort_keys=True) if health else "unreachable")
+        )
         payload = client.get_status()
         if payload is None:
             print("leader: unreachable")
@@ -127,14 +202,31 @@ def _coord_status(cfg: Config) -> int:
         try:
             print("pending: %d" % db.unpushed_count(conn))
             print("sync cursor: %s" % (db.get_meta(conn, coordination.CURSOR_KEY, "0") or 0))
-            print("reported cache: %d" % conn.execute("SELECT COUNT(*) FROM reported_cache").fetchone()[0])
+            print(
+                "reported cache: %d"
+                % conn.execute("SELECT COUNT(*) FROM reported_cache").fetchone()[0]
+            )
+            failures = db.get_meta(conn, coordination.SYNC_FAILURES_KEY, "0") or 0
+            print("consecutive sync failures: %s" % failures)
         finally:
             conn.close()
         return 0
+
     conn = db.connect(cfg.db_path)
     try:
         print("pending: %d" % db.pending_count(conn))
         print("unpushed: %d" % db.unpushed_count(conn))
+        print(
+            "reported cache: %d"
+            % conn.execute("SELECT COUNT(*) FROM reported_cache").fetchone()[0]
+        )
+        print(
+            "accepted/rejected from followers: %s / %s"
+            % (
+                db.get_meta(conn, coordination.ACCEPTED_KEY, "0") or 0,
+                db.get_meta(conn, coordination.REJECTED_KEY, "0") or 0,
+            )
+        )
     finally:
         conn.close()
     return 0
@@ -188,6 +280,17 @@ def main_report(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="build payloads, do not call the API")
     parser.add_argument("--check-key", action="store_true", help="validate the API key")
     parser.add_argument("--stats", action="store_true", help="print queue statistics")
+    parser.add_argument(
+        "--metrics",
+        action="store_true",
+        help="print a Prometheus snapshot of the queue, the cluster role and the last run",
+    )
+    parser.add_argument(
+        "--metric",
+        default=None,
+        metavar="NAME",
+        help="print one snapshot value (for monitoring agents); name is a metric suffix",
+    )
     parser.add_argument("--setup", action="store_true", help="ask for the API key and save it")
     parser.add_argument(
         "--migrate-key",
@@ -248,6 +351,19 @@ def main_report(argv: Optional[List[str]] = None) -> int:
             print("no status file at %s (run the reporter at least once)" % (cfg.status_path or "-"))
             return 1
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2))
+        return 0
+
+    if args.metric:
+        value = monitoring_value(cfg, args.metric)
+        if value is None:
+            print("error: unknown metric %r" % args.metric, file=sys.stderr)
+            return 2
+        print(value)
+        return 0
+
+    if args.metrics:
+        snapshot = metrics.build(cfg, status_path=getattr(cfg, "status_path", ""))
+        print(metrics.prometheus(snapshot), end="")
         return 0
 
     if args.stats:
@@ -328,6 +444,12 @@ def main_coord(argv: Optional[List[str]] = None) -> int:
     from .coord_server import main as _main_coord
 
     return _main_coord(argv)
+
+
+def main_witness(argv: Optional[List[str]] = None) -> int:
+    from .witness_cli import main as _main_witness
+
+    return _main_witness(argv)
 
 
 if __name__ == "__main__":  # pragma: no cover

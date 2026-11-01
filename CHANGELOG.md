@@ -4,6 +4,46 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] - 2026-11-01
+
+### Added
+
+* **Optional automatic failover with a witness arbiter.** `mode = auto` plus
+  `failover = witness` makes the role depend on a time-limited lease granted by
+  `abuseipdb-witness` (stdlib, one file, no state beyond the lease). The arbiter is
+  the only writer, it only ever *grants*, and an expired lease means follower - so a
+  lost arbiter cannot produce two leaders. A node that cannot reach the arbiter keeps
+  a lease it already holds until it expires. New binary, systemd unit
+  (`abuseipdb-witness.service`, installed but not enabled), keys `failover`,
+  `witness_url`, `witness_timeout`, `lease_ttl`, `lease_state_path`.
+* **TLS for the coordinator, from the standard library.** `tls_cert`/`tls_key` switch
+  the endpoint to HTTPS (TLS 1.2 floor), `tls_client_ca` requires client certificates,
+  and the follower verifies through `tls_ca` (a self-signed certificate works) with
+  `tls_client_cert`/`tls_client_key` for mTLS. `tls_verify = no` is for test rigs.
+* **`GET /v1/health`** - liveness without the shared secret, so monitoring can poll it
+  from an untrusted network. `GET /v1/status` also reports `effective`,
+  `reported_cache`, `reports_today`, `accepted_total`, `rejected_total` and `lease`.
+* **Metrics.** `abuseipdb-report --metrics` prints a Prometheus document,
+  `--metric <name>` prints a single value, and the reporter writes both `metrics.prom`
+  and `metrics.json` after every run. New series: coordination counters, cursor lag,
+  sync failures, leader reachability, lease state.
+* **Ready Zabbix module** (`monitoring/zabbix/`): an 8.0 template with 21 items, 8
+  triggers tagged `server={HOST.HOST}` and `service=fail2ban-abuseipdb`, 3 macros, an
+  agent 2 `UserParameter`, and `tools/zabbix-import.ps1` plus
+  `tools/zabbix-services.ps1` for the per-server service tree. Documented in
+  `docs/ZABBIX.md`.
+
+### Changed
+
+* A follower retries a failed sync `sync_attempts` times inside one run with
+  exponential backoff (`sync_retry_base`); a 4xx is not retried. Failures are counted
+  in `meta` and exported as metrics.
+* The declared jail list survives a failed `fail2ban-client status` (valid up to 24 h)
+  and an empty answer no longer overwrites a known list.
+* `abuseipdb-coord` refuses to serve pushed events in `auto` mode while the node does
+  not hold the lease (HTTP 409 with the lease document).
+* Tests: **232** (was 193).
+
 ## [1.4.4] - 2026-11-01
 
 ### Fixed
@@ -310,3 +350,4 @@ release ships the build pipeline, not new behaviour.
 [1.4.2]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.2
 [1.4.3]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.3
 [1.4.4]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.4
+[1.5.0]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.5.0

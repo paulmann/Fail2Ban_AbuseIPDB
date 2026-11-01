@@ -32,6 +32,7 @@ bans it is missing.
 | `none` (default) | standalone: every node reports for itself. Identical to 1.2.x. |
 | `leader` | reports as usual **and** runs `abuseipdb-coord` to answer follower syncs. Holds the API key. |
 | `follower` | never calls the API and needs no API key: pushes its queued bans, applies the bans it is told about, keeps the "already reported" cache. |
+| `auto` | candidate: leader while it holds the failover lease, follower otherwise. Needs `failover = witness`; without it the node is a follower, never a silent leader. |
 
 A follower's `abuseipdb-report` run is one sync request. If it fails, nothing is
 marked, the events stay queued and the next timer tick retries them - a leader
@@ -77,6 +78,18 @@ max_sync_bans = 50
 | `max_remote_bans_per_run` | `20` | cap on bans applied in one run (hard ceiling 200) |
 | `peer_dedupe_window` | `900` | seconds an address counts as "already reported" |
 | `max_sync_bans` | `50` | cap on bans the leader puts into one answer |
+| `sync_attempts` | `3` | follower: attempts per run before giving up until the next tick |
+| `sync_retry_base` | `1.0` | follower: base delay of the exponential backoff, seconds |
+| `failover` | `none` | `none` (manual) or `witness` (an arbiter grants the lease) |
+| `witness_url` | *(empty)* | where `abuseipdb-witness` listens |
+| `witness_timeout` | `5` | lease request timeout, seconds |
+| `lease_ttl` | `1800` | how long a granted lease stays valid, seconds |
+| `lease_state_path` | `/var/lib/abuseipdb/witness-lease.json` | arbiter state file |
+| `tls_cert` / `tls_key` | *(empty)* | switch the leader endpoint to HTTPS |
+| `tls_client_ca` | *(empty)* | require a client certificate (mTLS) |
+| `tls_ca` | *(empty)* | follower: CA (or the self-signed certificate) to trust |
+| `tls_verify` | `yes` | follower: verify the leader certificate |
+| `tls_client_cert` / `tls_client_key` | *(empty)* | follower: client certificate for mTLS |
 
 The timeout of coordination calls reuses `[abuseipdb] timeout`.
 
@@ -261,27 +274,178 @@ Rails, in order:
 reported-cache still sync). A ban the node already has produces
 `already banned` and is counted as not applied - harmless.
 
-## Failover (deliberate, manual)
+## Failover
 
-There is no election and no lease on purpose. A lease file on shared storage looks
-automatic but cannot be made safe without an atomic compare-and-swap: two nodes
-renewing it concurrently both believe they are the leader, and a split brain
-spends the account budget twice while breaking the per-IP interval. A manual switch
-is slower and always correct.
+Two strategies, both safe; the second is new in 1.5.0.
 
-1. On the broken leader: `systemctl stop abuseipdb-coord`, then stop the worker if
-   the host is unusable.
+### Manual (default, `failover = none`)
+
+1. On the broken leader: `systemctl stop abuseipdb-coord`, then stop the worker if the host is unusable.
 2. On the new leader: copy `/etc/abuseipdb/.abuseipdb.key` and
-   `/etc/abuseipdb/.coord.secret`, set `mode = leader` with its own `node_id`,
-   start `abuseipdb-coord`, check `--check-key`.
+   `/etc/abuseipdb/.coord.secret`, set `mode = leader` with its own `node_id`, start
+   `abuseipdb-coord`, check `--check-key`.
 3. On every follower: point `leader_url` at the new host and run
    `abuseipdb-report --coord-status`.
 4. On the old leader when it returns: set `mode = follower`, or keep it off.
    **Never leave two leaders reporting with the same key.**
 
-Queues are local, so nothing is lost: followers keep retrying and the new leader
-receives everything still pending. The reported cache also travels, so the new
-leader does not repeat a report the old one made two minutes ago.
+### Automatic with an arbiter (`failover = witness`)
+
+A second, deliberately tiny service decides **who may report** and nothing else:
+
+```
+   node-a (auto) ──POST /v1/lease {node_id, ttl}──►  abuseipdb-witness
+   node-b (auto) ◄── {granted: true|false, owner, expires, term} ──┘
+```
+
+* the arbiter is the only writer of the lease, so it cannot grant it twice;
+* it **never revokes**: it refuses the next renewal and the lease runs out;
+* a node that cannot reach the arbiter keeps a lease it already holds until it
+  expires - by then nobody else can have been granted it;
+* an expired or missing lease means **follower**; there is no path where a lost
+  arbiter produces two leaders;
+* the state file (`lease_state_path`) survives a restart, so restarting the arbiter
+  does not hand leadership to a second node.
+
+Setup:
+
+```bash
+# 1. on a third host (not a candidate), same secret file as the cluster
+sudo /usr/local/sbin/abuseipdb-witness --check
+sudo systemctl enable --now abuseipdb-witness.service
+
+# 2. on every candidate: mode = auto, then two extra keys
+sudo python3 tools/set_coordination.py --config /etc/abuseipdb/reporter.conf \
+    --mode auto --node-id node-a --leader-url https://10.0.0.5:8765
+#   [coordination]
+#   failover = witness
+#   witness_url = http://10.0.0.9:8765
+
+# 3. verify: exactly one node says "effective role: leader"
+abuseipdb-report --coord-status
+```
+
+The lease is renewed on every run, so `lease_ttl` must be **longer than the timer
+interval** (16 minutes by default → 1800 s is the default). Stop the leader and the
+next run on another candidate takes the lease; the old leader, when it comes back,
+asks again, is refused, and stays a follower - `--coord-status` prints the owner and
+the deadline it saw.
+
+Every candidate needs the API key, because any of them can become the leader. That is
+the price of automatic failover; with `failover = none` only the designated leader
+needs it.
+
+### What is deliberately not implemented
+
+A lease file on shared storage (NFS, a shared directory) cannot be made safe without
+an atomic compare-and-swap: two nodes renewing it concurrently both believe they are
+the leader, and a split brain spends the account budget twice while breaking the
+per-IP interval. Keepalived/corosync with a shared VIP is a valid alternative - it
+solves the same problem at the network layer - but it needs two addresses and a
+virtual IP, which is more than most installations want for a reporting helper.
+
+## TLS
+
+TLS comes from the standard library, so enabling it costs nothing:
+
+```ini
+[coordination]
+# leader: server certificate (and optionally require client certificates)
+tls_cert = /etc/abuseipdb/tls/cert.pem
+tls_key  = /etc/abuseipdb/tls/key.pem
+tls_client_ca = /etc/abuseipdb/tls/ca.pem     # optional: mTLS
+
+# follower
+leader_url = https://10.0.0.5:8765
+tls_ca = /etc/abuseipdb/tls/ca.pem            # CA; for a self-signed cert, the cert itself
+#tls_client_cert = /etc/abuseipdb/tls/client.pem   # when the leader requires mTLS
+#tls_client_key  = /etc/abuseipdb/tls/client-key.pem
+```
+
+Rules:
+
+* `tls_cert` **and** `tls_key` switch the listener to HTTPS; only one of them is a
+  configuration error and the endpoint refuses to start.
+* TLS 1.2 is the floor; the certificate is verified against the system store plus
+  `tls_ca`. `tls_verify = no` exists for a test rig and nowhere else - it disables the
+  hostname check too.
+* A self-signed certificate works: point `tls_ca` at the certificate itself.
+* The secret stays in `X-Coord-Secret` on top of TLS; either layer authenticates the
+  caller, both together cost nothing.
+
+Self-signed pair for a lab:
+
+```bash
+sudo install -d -m 700 /etc/abuseipdb/tls
+sudo openssl req -x509 -newkey rsa:2048 -nodes -days 825 \
+  -keyout /etc/abuseipdb/tls/key.pem -out /etc/abuseipdb/tls/cert.pem \
+  -subj "/CN=edge-1" -addext "subjectAltName=IP:10.0.0.5"
+sudo chmod 600 /etc/abuseipdb/tls/key.pem
+```
+
+If you would rather terminate TLS elsewhere, put nginx or Caddy in front and keep
+`coord_bind = 127.0.0.1`:
+
+```nginx
+location /v1/ {
+    proxy_pass http://127.0.0.1:8765;
+    proxy_set_header X-Coord-Secret $http_x_coord_secret;
+    allow 10.0.0.0/24; deny all;
+    # ssl_certificate / ssl_certificate_key from the server block
+}
+```
+
+```caddyfile
+coord.example.internal {
+    reverse_proxy 127.0.0.1:8765
+    @peers remote_ip 10.0.0.0/24
+    handle @peers
+    respond 403
+}
+```
+
+## Health endpoint and monitoring
+
+`GET /v1/health` answers **without** the shared secret and returns liveness-level
+facts only, so a monitoring host can poll it from an untrusted network:
+
+```json
+{"ok": true, "role": "leader", "mode": "auto", "node_id": "edge-1",
+ "version": "1.5.0", "tls": true, "time": 1793481600,
+ "lease": {"mode": "auto", "effective": "leader",
+           "lease": {"held": true, "owner": "edge-1", "expires": 1793483400}}}
+```
+
+`GET /v1/status` (secret required) adds the queue: `pending`, `unpushed`,
+`reported_cache`, `reports_today`, `accepted_total`, `rejected_total`, `lease`.
+
+`abuseipdb-report --metrics` prints a Prometheus document with the same numbers, and
+the reporter writes it to `metrics_textfile` (`/var/lib/abuseipdb/metrics.prom`) plus
+a JSON twin (`metrics_json_path`) on every run. `abuseipdb-report --metric <name>`
+prints one value out of the JSON snapshot - that is what the Zabbix module uses, see
+[ZABBIX.md](ZABBIX.md).
+
+Alerts worth having:
+
+| Symptom | Metric | Why it matters |
+|---|---|---|
+| reporter stopped running | `last_run_age_seconds > 7200` | bans queue up, nothing is reported |
+| follower cannot reach the leader | `coord_sync_failures > 2`, `leader_up = 0` | reports are stuck on that node |
+| queue growing | `pending_events > 200` | budget exhausted, key invalid, or leader down |
+| budget spent | `budget_remaining = 0` | nothing more today; the queue drains after midnight UTC |
+| nobody holds the lease | `lease_held = 0` on every node | nobody reports - check `witness_url` and the arbiter |
+
+## Retries and a bad `fail2ban-client`
+
+* A follower retries a failed sync `sync_attempts` times inside one run, with an
+  exponential delay (`sync_retry_base` doubling, capped). A `4xx` from the leader is
+  **not** retried: a wrong secret does not fix itself. Events stay queued, so a leader
+  outage delays reports and never loses them.
+* The jail list a node declares is cached for an hour. A failed
+  `fail2ban-client status` no longer blanks it: the previous answer stays valid for up
+  to 24 hours, so a fail2ban restart does not turn into a flood of ban requests for
+  jails the node does have. An empty answer is remembered for one TTL and never
+  overwrites a known list.
 
 ## Security
 
