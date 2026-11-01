@@ -1,11 +1,11 @@
 {
   "name": "Fail2Ban_AbuseIPDB",
-  "version": "1.4.4",
+  "version": "1.5.1",
   "released": "2026-11-01",
   "requires_python": ">=3.9",
-  "tarball": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/download/v1.4.4/Fail2Ban_AbuseIPDB-1.4.4.tar.gz",
-  "sha256": "c706db368105cbcb4a597af887efd5fc38066bf911909c965b1b2a335be74c51",
-  "release_notes": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.4.4",
+  "tarball": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/download/v1.5.1/Fail2Ban_AbuseIPDB-1.5.1.tar.gz",
+  "sha256": "17880efedacd79e2b8bba6d0ee9b107a69ef3edcf401ac5d05e461380ad3743d",
+  "release_notes": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.5.1",
   "changelog": "https://github.com/paulmann/Fail2Ban_AbuseIPDB/blob/main/CHANGELOG.md",
-  "notes": "v1.4.4: the update manifest is read through api.github.com (not CDN-cached) with the raw URL as fallback, so a fresh release is seen at once - 1.4.3's query-parameter approach measured ineffective and is no longer used. Includes 1.4.2 (PyPI publishing from CI over OIDC trusted publishing with PEP 740 attestations) and 1.4.x two-way leader/follower sync: bans travel between nodes, reports never repeat."
+  "notes": "v1.5.1: optional automatic failover with a witness arbiter, TLS for the coordinator from the standard library, an unauthenticated /v1/health endpoint, Prometheus and JSON snapshots (--metrics, --metric), a ready Zabbix 8.0 module (21 items, 8 triggers, per-server services) and retries with backoff for follower syncs. Includes 1.4.x: two-way leader/follower sync with ban propagation and report deduplication."
 }
