@@ -4,7 +4,7 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.6.0] - 2026-11-01
 
 ### Added
 
@@ -442,3 +442,4 @@ release ships the build pipeline, not new behaviour.
 [1.5.1]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.5.1
 [1.5.2]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.5.2
 [1.5.3]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.5.3
+[1.6.0]: https://github.com/paulmann/Fail2Ban_AbuseIPDB/releases/tag/v1.6.0
