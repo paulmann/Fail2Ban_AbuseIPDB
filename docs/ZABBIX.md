@@ -176,4 +176,5 @@ all OK. Two findings from the rollout, both fixed in 1.5.2:
 | all values `0` on a busy host | the reporter never ran, so no snapshot exists | `abuseipdb-report --stats`, check the timer |
 | `unsupported` string as a value | the item name is not in the snapshot | `abuseipdb-report --metric <name>` to see the accepted names |
 | values stuck | the item interval is longer than the reporter's | the reporter rewrites the snapshot every run (16 min); `delay = 5m` is the generated default |
+| one item `unsupported`, error `Timeout while executing a shell script` | the agent's `Timeout` (3 s by default) was too short while the host was busy | raise `Timeout=10` in the agent config; the item recovers on the next poll by itself - measured on 5.35 during a load test, back to `state=0` one cycle later |
 | triggers never fire | the template is linked but tags were changed | keep `server={HOST.HOST}` and `service=fail2ban-abuseipdb` - the services match them |
