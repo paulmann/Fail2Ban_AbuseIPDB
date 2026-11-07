@@ -98,7 +98,50 @@ jobs:
       # Trusted publishing: no password, no stored token. GitHub mints a
       # short-lived OIDC token and PyPI exchanges it for an upload token scoped
       # to this repository, this workflow and the pypi environment.
+      #
+      # PyPI files are immutable: a second upload of the same version answers
+      # "400 File already exists". Re-running this workflow for an already
+      # published tag is a normal operation (for example after the GitHub
+      # release step failed halfway), and it must not look like a broken
+      # release. Ask PyPI first and name the reason the upload is skipped; a
+      # version that is missing (404) is published by the next step.
+      - name: Check whether this version is already on PyPI
+        id: pypi
+        shell: bash
+        run: |
+          set -euo pipefail
+          project="fail2ban-abuseipdb-reporter"
+          version="${{ steps.v.outputs.version }}"
+          url="https://pypi.org/pypi/$project/$version/json"
+          # 404 is an answer here, not a curl failure, and --output /dev/null
+          # keeps the JSON body out of the log.
+          code="$(curl --silent --show-error --location --output /dev/null \
+            --write-out '%{http_code}' "$url" || true)"
+          case "$code" in
+            200)
+              echo "exists=true" >> "$GITHUB_OUTPUT"
+              echo "$project $version is already on PyPI ($url answered HTTP 200): upload skipped, PyPI files are immutable"
+              {
+                echo "### PyPI: version already published, nothing was uploaded"
+                echo
+                echo "\`$project $version\` is already on PyPI (\`$url\` answered HTTP 200)."
+                echo "Re-running the release for an already published tag is the usual cause."
+              } >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            404)
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+              echo "$project $version is not on PyPI yet ($url answered HTTP 404): the upload step publishes it"
+              ;;
+            *)
+              # Guessing here would either hide a broken index or duplicate a
+              # release: stop and show what PyPI answered.
+              echo "::error::cannot tell whether $project $version is on PyPI: $url answered HTTP ${code:-nothing}"
+              exit 1
+              ;;
+          esac
+
       - name: Publish to PyPI
+        if: steps.pypi.outputs.exists == 'false'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
@@ -112,6 +155,18 @@ jobs:
           set -euo pipefail
           tag="${{ steps.v.outputs.tag }}"
           version="${{ steps.v.outputs.version }}"
+          # A re-run must not fail here either: an existing release and its
+          # assets are published artefacts. They are left untouched, not
+          # replaced, and the log says so.
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "GitHub release $tag already exists: left untouched (published assets are immutable)"
+            {
+              echo "### GitHub release: already exists, nothing was created"
+              echo
+              echo "\`$tag\` is already published; this run did not replace it or its assets."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           notes="docs/release-notes-$version.md"
           extra=()
           if [ -f "$notes" ]; then

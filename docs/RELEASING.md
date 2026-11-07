@@ -100,6 +100,11 @@ can be revoked; the CI path does not read it.
 | `Metadata is not valid` | `pyproject.toml` is wrong - run `python -m twine check dist/*` locally first |
 | Step skipped with a permissions error | `id-token: write` missing from the **job** (`permissions` does not merge with the file-level block) |
 
-`400 File already exists` is also the harmless result of re-running the Release
-workflow on a tag that was already published - the OIDC exchange still worked,
-which is what that re-run actually proves.
+Re-running the Release workflow for a tag that is already published no longer
+ends in `400 File already exists`: the workflow asks
+`https://pypi.org/pypi/fail2ban-abuseipdb-reporter/<version>/json` first, skips the
+upload when the version exists (HTTP 200) and prints the reason in the log and the
+job summary, while a version that is missing (HTTP 404) is uploaded. Any other
+answer from PyPI fails the job instead of guessing. The GitHub release step is
+idempotent in the same way: an existing release and its assets are left untouched,
+which is what makes a re-run after a half-finished release safe.
